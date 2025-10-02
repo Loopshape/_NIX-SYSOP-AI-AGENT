@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Code Reviewer",
+  "description": "An intelligent code reviewer powered by the Gemini API.",
+  "requestFramePermissions": []
+}
