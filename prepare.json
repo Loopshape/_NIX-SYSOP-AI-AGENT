@@ -1,0 +1,7 @@
+{
+  "prompt": "Summarize the latest AI research breakthroughs.",
+  "parameters": {
+    "temperature": 0.7,
+    "max_tokens": 300
+  }
+}
