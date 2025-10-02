@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+import argparse, json, sys, os, yaml
+
+def load_file(path):
+    with open(path, "r") as f:
+        if path.endswith(".yaml") or path.endswith(".yml"):
+            return yaml.safe_load(f)
+        return json.load(f)
+
+def save_file(path, data):
+    with open(path, "w") as f:
+        if path.endswith(".yaml") or path.endswith(".yml"):
+            yaml.safe_dump(data, f, default_flow_style=False)
+        else:
+            json.dump(data, f, indent=2)
+
+def query(data, path):
+    import jmespath
+    return jmespath.search(path, data)
+
+def main():
+    parser = argparse.ArgumentParser(description="Jome CLI (JSON/YAML Object Manipulation)")
+    sub = parser.add_subparsers(dest="cmd")
+
+    # view
+    p_view = sub.add_parser("view"); p_view.add_argument("file")
+
+    # query
+    p_q = sub.add_parser("query")
+    p_q.add_argument("file"); p_q.add_argument("expression")
+
+    # set
+    p_set = sub.add_parser("set")
+    p_set.add_argument("file"); p_set.add_argument("path"); p_set.add_argument("value")
+
+    # delete
+    p_del = sub.add_parser("delete")
+    p_del.add_argument("file"); p_del.add_argument("path")
+
+    # merge
+    p_merge = sub.add_parser("merge")
+    p_merge.add_argument("base"); p_merge.add_argument("override")
+
+    # convert
+    p_conv = sub.add_parser("convert")
+    p_conv.add_argument("src"); p_conv.add_argument("dest")
+
+    args = parser.parse_args()
+
+    if args.cmd == "view":
+        print(json.dumps(load_file(args.file), indent=2))
+
+    elif args.cmd == "query":
+        data = load_file(args.file)
+        result = query(data, args.expression)
+        print(json.dumps(result, indent=2))
+
+    elif args.cmd == "set":
+        data = load_file(args.file)
+        # naive dot-path assignment
+        keys = args.path.strip(".").split(".")
+        d = data
+        for k in keys[:-1]:
+            d = d.setdefault(k, {})
+        d[keys[-1]] = args.value
+        save_file(args.file, data)
+
+    elif args.cmd == "delete":
+        data = load_file(args.file)
+        keys = args.path.strip(".").split(".")
+        d = data
+        for k in keys[:-1]:
+            d = d.get(k, {})
+        d.pop(keys[-1], None)
+        save_file(args.file, data)
+
+    elif args.cmd == "merge":
+        base = load_file(args.base)
+        over = load_file(args.override)
+        def deep_merge(a, b):
+            for k, v in b.items():
+                if isinstance(v, dict) and k in a:
+                    deep_merge(a[k], v)
+                else:
+                    a[k] = v
+        deep_merge(base, over)
+        save_file(args.base, base)
+
+    elif args.cmd == "convert":
+        data = load_file(args.src)
+        save_file(args.dest, data)
+
+    else:
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()

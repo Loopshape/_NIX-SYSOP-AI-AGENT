@@ -1,0 +1,9 @@
+{
+  "prompts": [
+    "Create a main HTML structure for a dashboard with a top header, burger menu on the top right, and a fixed panel with background color #772233.",
+    "Implement two vertically stacked 3D carousels under the main header. Each carousel should rotate independently and show cards with dark-monokai neon styling.",
+    "Style all text, buttons, inputs, and card content using dark-monokai palette with neon accent colors: #A6E22E (green), #66D9EF (blue), #E6DB74 (yellow), #F92672 (red).",
+    "Ensure carousels are responsive and draggable, with arrow key and button controls, using Three.js and GSAP.",
+    "Add system logging panel and local AI chat integration placeholders below the carousels for testing interaction."
+  ]
+}

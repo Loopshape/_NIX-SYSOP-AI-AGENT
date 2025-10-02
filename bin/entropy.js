@@ -1,0 +1,1 @@
+/home/loop/.bin/.entropy.js

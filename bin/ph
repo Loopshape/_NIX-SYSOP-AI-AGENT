@@ -1,0 +1,4 @@
+curl http://localhost:11434/api/generate -d '{
+  "model": "2244",
+  "prompt": "Open Brave and search for pantyhose girl on xhamster.com"
+}'

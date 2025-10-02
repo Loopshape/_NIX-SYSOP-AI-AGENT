@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+import argparse
+import requests
+import sys
+
+# --- Public APIs ---
+BTC_API = "https://blockchain.info/ticker"
+COINGECKO_API = "https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses={token}&vs_currencies=usd"
+
+TOKENS = {
+    "usdc": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "shib": "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE"
+}
+
+def btc_price():
+    r = requests.get(BTC_API, timeout=5).json()
+    return r['USD']['last']
+
+def token_price(token):
+    contract = TOKENS[token]
+    url = COINGECKO_API.format(token=contract)
+    r = requests.get(url, timeout=5).json()
+    return r.get(contract.lower(), {}).get('usd', None)
+
+def print_prices():
+    print("=== Prices (USD) ===")
+    print(f"BTC: ${btc_price():,.2f}")
+    for token in TOKENS:
+        price = token_price(token)
+        print(f"{token.upper()}: ${price:,.6f}")
+
+def xchange(amount, from_curr, to_curr):
+    # Convert amount from from_curr to to_curr using USD as intermediary
+    if from_curr.lower() == "btc":
+        from_usd = btc_price() * amount
+    else:
+        from_usd = token_price(from_curr.lower()) * amount
+
+    if to_curr.lower() == "btc":
+        converted = from_usd / btc_price()
+    else:
+        converted = from_usd / token_price(to_curr.lower())
+    print(f"{amount} {from_curr.upper()} → {converted:.6f} {to_curr.upper()}")
+
+def main():
+    parser = argparse.ArgumentParser(description="DEX CLI - BTC / USDC / SHIB")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    # Prices command
+    sub.add_parser("prices", help="Show current prices")
+
+    # Xchange command
+    x = sub.add_parser("xchange", help="Convert amount from one token to another")
+    x.add_argument("amount", type=float)
+    x.add_argument("from_currency", choices=["btc","usdc","shib"])
+    x.add_argument("to_currency", choices=["btc","usdc","shib"])
+
+    args = parser.parse_args()
+
+    if args.cmd == "prices":
+        print_prices()
+    elif args.cmd == "xchange":
+        xchange(args.amount, args.from_currency, args.to_currency)
+
+if __name__ == "__main__":
+    main()
