@@ -1,98 +1,135 @@
 #!/usr/bin/env bash
-# AI CLI v3.1 with Monokai-dark syntax highlighting for code snippets
-set -euo pipefail
-IFS=$'\n\t'
+# AI CLI - Termux + Proot + Local AI
+# Features:
+# - DB auto-init with cache fix
+# - Syntax highlighting (Monokai-dark)
+# - English/German output filter
+# - Works standalone
 
-# --- ANSI Colors (Monokai-dark) ---
-RESET="\033[0m"
-BLACK="\033[30m"
-RED="\033[31m"
-GREEN="\033[92m"
-ORANGE="\033[38;5;214m"
-BLUE="\033[34m"
-PINK="\033[95m"
-CYAN="\033[36m"
-GRAY="\033[37m"
-YELLOW="\033[33m"
-
-log() { echo -e "${BLUE}[$(date '+%H:%M:%S')]${RESET} $*"; }
-
-# --- Directories ---
-AI_HOME="${HOME}/.local_ai"
-MODULES_DIR="$AI_HOME/modules"
+AI_HOME="$HOME/.local_ai"
 DB="$AI_HOME/core.db"
-mkdir -p "$AI_HOME" "$MODULES_DIR"
+mkdir -p "$AI_HOME"
 
-# --- Self-Heal / Update ---
-SELF="$AI_HOME/ai"
-curl -sL "https://raw.githubusercontent.com/YourUser/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto/main/ai.sh" -o "$SELF.tmp" && chmod +x "$SELF.tmp" && mv "$SELF.tmp" "$SELF"
-alias ai="$SELF"
+RESET="\033[0m"
+PINK="\033[95m"
+GREEN="\033[92m"
+ORANGE="\033[33m"
+CYAN="\033[96m"
+GRAY="\033[90m"
 
-# --- Modules ---
-for mod in blockchain nostr lightning termux url-parser snippet-assembler; do
-    curl -sL "https://raw.githubusercontent.com/YourUser/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto/main/modules/$mod.sh" -o "$MODULES_DIR/$mod.sh"
-    chmod +x "$MODULES_DIR/$mod.sh"
-done
+log() { echo "[AI] $*"; }
 
-# --- Dependencies ---
-for cmd in python3 sqlite3 curl wget git unzip node npm ollama; do
-    if ! command -v "$cmd" >/dev/null; then
-        log "Installing $cmd..."
-        case "$cmd" in
-            python3|sqlite3|curl|wget|git|unzip|node|npm) apt install -y "$cmd" ;;
-            ollama)
-                curl -L -o /tmp/ollama.tar.gz https://ollama-releases.s3.amazonaws.com/ollama-cli-latest-linux.tar.gz
-                tar -xzf /tmp/ollama.tar.gz -C /tmp
-                chmod +x /tmp/ollama
-                mv /tmp/ollama /usr/local/bin/
-                ;;
-        esac
+prepare_db() {
+    if [ ! -f "$DB" ]; then
+        log "Initializing AI core database..."
+        sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS mindflow(
+            id INTEGER PRIMARY KEY,
+            session_id TEXT,
+            loop_id INTEGER,
+            model_name TEXT,
+            output TEXT,
+            rank INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        );"
+        sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS task_logs(
+            id INTEGER PRIMARY KEY,
+            tool_used TEXT,
+            args TEXT,
+            output_summary TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        );"
+        sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(
+            prompt_hash TEXT PRIMARY KEY,
+            final_answer TEXT
+        );"
+    else
+        sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(
+            prompt_hash TEXT PRIMARY KEY,
+            final_answer TEXT
+        );"
     fi
-done
+}
 
-# --- Database Setup ---
-sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS mindflow(id INTEGER PRIMARY KEY, session_id TEXT, model_name TEXT, output TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
-sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(prompt_hash TEXT PRIMARY KEY, final_answer TEXT);"
-
-# --- Prompt ---
-PROMPT="${*:-}"
-if [ -z "$PROMPT" ]; then
-    read -rp "Enter your prompt: " PROMPT
-fi
-
-# --- Cache Check ---
-HASH=$(echo -n "$PROMPT" | sha256sum | awk '{print $1}')
-CACHED=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$HASH';")
-if [ -n "$CACHED" ]; then
-    echo -e "${GREEN}$CACHED${RESET}"
-    exit 0
-fi
-
-# --- AI Generation ---
-MODEL="default-model"
-RAW_OUTPUT=$(ollama generate "$MODEL" "$PROMPT" 2>/dev/null)
-
-# --- Language Filter ---
-FILTERED_OUTPUT=$(echo "$RAW_OUTPUT" | sed 's/[^A-Za-z0-9äöüßÄÖÜ,.!?;:()"\x27 \t\n-]//g')
-
-# --- Store in DB ---
-SESSION=$(uuidgen)
-sqlite3 "$DB" "INSERT INTO mindflow(session_id, model_name, output) VALUES('$SESSION','$MODEL','$(echo "$FILTERED_OUTPUT" | sed "s/'/''/g")');"
-sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$HASH','$(echo "$FILTERED_OUTPUT" | sed "s/'/''/g")');"
-
-# --- Monokai-dark Syntax Highlighting Function ---
 highlight_code() {
-    local code="$1"
-    code=$(echo "$code" | sed -E \
-        -e "s/([0-9]+)/${ORANGE}\1${RESET}/g" \
-        -e "s/\"([^\"]*)\"/${GREEN}\"\\1\"${RESET}/g" \
-        -e "s/'([^']*)'/${GREEN}'\\1'${RESET}/g" \
-        -e "s/\\b(if|else|for|while|return|function|import|from|class|def|in|break|continue)\\b/${PINK}\1${RESET}/g" \
-        -e "s/#(.*)/${GRAY}#\1${RESET}/g")
+    local code="$1" lang="$2"
+    case "$lang" in
+        python)
+            code=$(echo "$code" | sed -E "s/([0-9]+)/${ORANGE}\1${RESET}/g")
+            code=$(echo "$code" | sed -E "s/\"([^\"]*)\"/${GREEN}\"\\1\"${RESET}/g; s/'([^']*)'/${GREEN}'\\1'${RESET}/g")
+            code=$(echo "$code" | sed -E "s/\\b(if|else|for|while|return|def|class|in|break|continue|import|from)\\b/${PINK}\1${RESET}/g")
+            code=$(echo "$code" | sed -E "s/#(.*)/${GRAY}#\1${RESET}/g")
+            ;;
+        javascript)
+            code=$(echo "$code" | sed -E "s/([0-9]+)/${ORANGE}\1${RESET}/g")
+            code=$(echo "$code" | sed -E "s/\"([^\"]*)\"/${GREEN}\"\\1\"${RESET}/g; s/'([^']*)'/${GREEN}'\\1'${RESET}/g")
+            code=$(echo "$code" | sed -E "s/\\b(if|else|for|while|return|function|var|let|const|import|from)\\b/${PINK}\1${RESET}/g")
+            code=$(echo "$code" | sed -E "s/\/\/(.*)/${GRAY}\/\/\1${RESET}/g")
+            ;;
+        bash)
+            code=$(echo "$code" | sed -E "s/([0-9]+)/${ORANGE}\1${RESET}/g")
+            code=$(echo "$code" | sed -E "s/\"([^\"]*)\"/${GREEN}\"\\1\"${RESET}/g; s/'([^']*)'/${GREEN}'\\1'${RESET}/g")
+            code=$(echo "$code" | sed -E "s/\\b(if|else|for|while|function|return|do|done)\\b/${CYAN}\1${RESET}/g")
+            code=$(echo "$code" | sed -E "s/#(.*)/${GRAY}#\1${RESET}/g")
+            ;;
+        c|cpp)
+            code=$(echo "$code" | sed -E "s/([0-9]+)/${ORANGE}\1${RESET}/g")
+            code=$(echo "$code" | sed -E "s/\"([^\"]*)\"/${GREEN}\"\\1\"${RESET}/g; s/'([^']*)'/${GREEN}'\\1'${RESET}/g")
+            code=$(echo "$code" | sed -E "s/\\b(int|float|double|char|return|if|else|for|while|void|struct)\\b/${PINK}\1${RESET}/g")
+            code=$(echo "$code" | sed -E "s/\/\/(.*)/${GRAY}\/\/\1${RESET}/g; s/\/\*(.*)\*\//${GRAY}\/\1\/${RESET}/g")
+            ;;
+        *)
+            code=$(echo "$code" | sed "s/^/${CYAN}/;s/$/${RESET}/")
+            ;;
+    esac
     echo -e "$code"
 }
 
-# --- Output ---
-echo -e "${CYAN}--- AI Output ---${RESET}"
-highlight_code "$FILTERED_OUTPUT"
-log "✅ AI CLI finished. English/German only enforced."
+process_output() {
+    local text="$1"
+    local in_code=0 lang=""
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^\`\`\` ]]; then
+            if [ $in_code -eq 0 ]; then
+                in_code=1
+                lang=$(echo "$line" | cut -d'`' -f4)
+            else
+                in_code=0
+            fi
+            continue
+        fi
+        # Allow only English/German chars
+        line=$(echo "$line" | sed 's/[^a-zA-Z0-9äöüÄÖÜß[:punct:] ]//g')
+        if [ $in_code -eq 1 ]; then
+            highlight_code "$line" "$lang"
+        else
+            echo -e "$line"
+        fi
+    done <<< "$text"
+}
+
+main() {
+    prepare_db
+    if [ -z "$1" ]; then
+        echo "Usage: ai '<your prompt>'"
+        exit 1
+    fi
+    PROMPT="$*"
+    log "Processing prompt: $PROMPT"
+
+    # hash for caching
+    HASH=$(echo -n "$PROMPT" | sha1sum | cut -d' ' -f1)
+    CACHED=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$HASH';")
+    if [ -n "$CACHED" ]; then
+        log "Loaded from cache."
+        process_output "$CACHED"
+        exit 0
+    fi
+
+    # call ollama
+    OUTPUT=$(ollama run llama2 "$PROMPT")
+    process_output "$OUTPUT"
+
+    sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$HASH', '$(echo "$OUTPUT" | sed "s/'/''/g")');"
+}
+
+main "$@"
