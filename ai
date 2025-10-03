@@ -73,7 +73,7 @@ run_ollama() {
         log "Detected Chinese input, translating to English..."
         prompt="[Translate to English] $prompt"
     fi
-    ollama run "$MODEL" --prompt "$prompt"
+    ollama run "$MODEL" "$prompt"
 }
 
 # Main
