@@ -29,6 +29,22 @@ if ! swapon --show | grep -q "$SWAP_FILE"; then
     sudo swapon "$SWAP_FILE" || log "⚠ Could not activate swapfile"
 fi
 
+MODULES=(
+  blockchain
+  nostr
+  lightning
+  termux
+  proot
+  url-parser
+  snippet-assembler
+)
+
+for m in "${MODULES[@]}"; do
+  URL="https://raw.githubusercontent.com/YourGitHubUser/YourRepo/main/modules/$m.sh"
+  log "Downloading module $m..."
+  curl -fsSL -o "$AI_HOME/modules/$m.sh" "$URL" || log "⚠ Failed to download $m"
+done
+
 # Set inotify watches high for AI
 if [ -w /proc/sys/fs/inotify/max_user_watches ]; then
     log "Setting inotify max_user_watches to 524288"
