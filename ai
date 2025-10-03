@@ -1,97 +1,98 @@
 #!/usr/bin/env bash
-# One-Shot AI CLI Installer / Updater for Termux + Proot + Ollama
-
+# ~/.bin/ai — Bulletproof Ollama CLI wrapper
 set -euo pipefail
 IFS=$'\n\t'
 
-#!/usr/bin/env bash
-# AI CLI wrapper — uses Ollama CLI directly
-PROMPT="$*"
-MODEL="2244:latest"   # change to your preferred model
+AI_HOME="${HOME}/.local_ai"
+DB="$AI_HOME/core.db"
+MODULES="$AI_HOME/modules"
+MODEL="${AI_MODEL:-2244:latest}"
 
-# Run the model and capture output
-ollama run "$MODEL" --prompt "$PROMPT"
+mkdir -p "$AI_HOME" "$MODULES"
 
-AI_HOME="$HOME/.local_ai"
-BIN_DIR="$HOME/.bin"
-AI_CLI="$BIN_DIR/ai"
+log() { echo -e "[\033[1;32m$(date '+%H:%M:%S')\033[0m] $*"; }
 
-mkdir -p "$AI_HOME" "$BIN_DIR" "$AI_HOME/modules"
+# --- Load environment ---
+[ -f "$HOME/.env" ] && source "$HOME/.env"
+[ -f "$HOME/.env.local" ] && source "$HOME/.env.local"
 
-log() { echo "[$(date '+%H:%M:%S')] $*"; }
-
-log "✅ Installing core dependencies..."
-# Install only minimal required packages
-apt update && apt install -y python3-full curl wget git unzip nodejs build-essential || true
-command -v brew >/dev/null || true  # optional Homebrew
-command -v npm >/dev/null || true   # optional npm
-command -v pip >/dev/null || true   # optional pip
-
-# --- Install Ollama CLI if missing ---
-if ! command -v ollama >/dev/null; then
-    log "Downloading Ollama CLI..."
-    curl -L -o /tmp/ollama.tar.gz https://ollama-releases.s3.amazonaws.com/ollama-cli-latest-linux.tar.gz
-    tar -xzf /tmp/ollama.tar.gz -C /tmp
-    chmod +x /tmp/ollama
-    mv /tmp/ollama /usr/local/bin/
-    log "Ollama installed."
+# --- Ensure Python3 ---
+if ! command -v python3 &>/dev/null; then
+    log "Installing python3-full..."
+    sudo apt update && sudo apt install -y python3-full
 fi
 
-# --- Install patched AI CLI ---
-log "Installing patched AI CLI..."
-cat > "$AI_CLI" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail; IFS=$'\n\t'
-AI_HOME="$HOME/.local_ai"; SERVER_PORT="${SERVER_PORT:-11434}"
-
-# Load environment
-[ -f "$HOME/.env.local" ] && { set -a; source "$HOME/.env.local"; set +a; } || \
-[ -f "$HOME/.env" ] && { set -a; source "$HOME/.env"; set +a; }
-
-# Start Ollama if not running
-if ! pgrep -x ollama >/dev/null 2>&1; then
-    mkdir -p "$HOME/logs"
-    nohup ollama serve > "$HOME/logs/ollama_server.log" 2>&1 &
+# --- Initialize DB if missing ---
+if [ ! -f "$DB" ]; then
+    log "Initializing AI core database..."
+    sqlite3 "$DB" <<SQL
+CREATE TABLE IF NOT EXISTS mindflow(
+    id INTEGER PRIMARY KEY,
+    session_id TEXT,
+    loop_id INTEGER,
+    model_name TEXT,
+    output TEXT,
+    rank INTEGER,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS task_logs(
+    id INTEGER PRIMARY KEY,
+    tool_used TEXT,
+    args TEXT,
+    output_summary TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS cache(
+    prompt_hash TEXT PRIMARY KEY,
+    final_answer TEXT
+);
+SQL
 fi
 
-# Wait for Ollama server
-until curl -s "http://localhost:$SERVER_PORT/ask" >/dev/null 2>&1; do sleep 1; done
+# --- Load modules ---
+for m in "$MODULES"/*.sh; do
+    [ -f "$m" ] && source "$m"
+done
 
-# Prompt input
-[ "$#" -lt 1 ] && { echo "Usage: ai 'your prompt'"; exit 1; }
+# --- Build prompt ---
 PROMPT="$*"
+if [ -z "$PROMPT" ]; then
+    log "Usage: ai 'your question or task'"
+    exit 1
+fi
 
-# Query Ollama
-RESPONSE=$(curl -s "http://localhost:$SERVER_PORT/ask" \
-    -H "Content-Type: application/json" \
-    -d "{\"prompt\":\"$PROMPT\"}")
+# --- Check cache ---
+PROMPT_HASH=$(echo -n "$PROMPT" | sha256sum | awk '{print $1}')
+CACHED=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$PROMPT_HASH';")
+if [ -n "$CACHED" ]; then
+    echo "$CACHED"
+    exit 0
+fi
 
-# Extract answer and auto-translate Chinese -> English
-ANSWER=$(echo "$RESPONSE" | python3 -c "
-import sys, json
-r=json.load(sys.stdin)
-text=r.get('answer','')
-if any('\u4e00' <= c <= '\u9fff' for c in text):
-    import subprocess
-    result=subprocess.run(['trans','-b',':en',text], capture_output=True, text=True)
-    text=result.stdout.strip()
-print(text)
-")
-echo -e "$ANSWER"
-EOF
+# --- Run Ollama ---
+OUTPUT=$(ollama run "$MODEL" --prompt "$PROMPT" 2>/dev/null || true)
 
-chmod +x "$AI_CLI"
-ln -sf "$AI_CLI" "$BIN_DIR/ai"
-log "✅ Patched AI CLI installed at $AI_CLI and symlinked to $BIN_DIR/ai"
+# --- Auto-translate Chinese to English ---
+if echo "$OUTPUT" | grep -P '[\p{Han}]' &>/dev/null; then
+    if command -v translate-cli &>/dev/null; then
+        OUTPUT=$(translate-cli -t en <<< "$OUTPUT")
+    fi
+fi
 
-# --- Self-heal script ---
-log "Creating self-heal updater..."
-cat > "$AI_HOME/self_heal.sh" <<EOF
-#!/usr/bin/env bash
-curl -s -o $AI_CLI https://raw.githubusercontent.com/user/ai/main/ai.sh
-chmod +x $AI_CLI
-EOF
-chmod +x "$AI_HOME/self_heal.sh"
-log "✅ Self-heal script created at $AI_HOME/self_heal.sh"
+# --- Restrict to English/German output ---
+OUTPUT=$(echo "$OUTPUT" | LANG=en_US.UTF-8 perl -pe 's/[\p{^Latin}\p{^Common}]//g')
 
-log "🎉 Installation complete. Start AI CLI with: ai 'your prompt'"
+# --- Store in cache ---
+sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES ('$PROMPT_HASH', '$(echo "$OUTPUT" | sqlite3_escape)');"
+
+# --- Print result with optional syntax highlight ---
+if command -v pygmentize &>/dev/null && echo "$OUTPUT" | grep -qE '```'; then
+    echo "$OUTPUT" | pygmentize -f terminal256 -g
+else
+    echo "$OUTPUT"
+fi
+
+# --- Utility: escape string for SQLite ---
+sqlite3_escape() {
+    perl -MString::Escape -pe 's/([\'"\\])/\\$1/g'
+}
