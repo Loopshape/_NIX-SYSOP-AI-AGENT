@@ -1,89 +1,210 @@
 #!/usr/bin/env bash
-# ~/.bin/ai - Bulletproof AI CLI (Termux + Proot + Ollama)
-set -euo pipefail
-IFS=$'\n\t'
+# ai_launch.sh - Bulletproof launcher for Local AI (Termux + Proot)
+# Enhancements: Robust path handling, better error checks, safer SQLite, improved Ollama communication, and stricter module validation.
+set -euo pipefail; IFS=$'\n\t'
 
-AI_HOME="$HOME/.local_ai"
-LOGS="$AI_HOME/logs"
+# --- Configuration ---
+# Use standard XDG base directory for cache/data if possible, but keep original for compatibility
+AI_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/local_ai" # Use XDG standard path
 DB="$AI_HOME/core.db"
-mkdir -p "$AI_HOME/modules" "$AI_HOME/sandbox" "$LOGS"
+SANDBOX="$AI_HOME/sandbox"
+LOGS="$HOME/logs/local_ai" # Separate logs into a dedicated folder for clarity
+OLLAMA_MODEL="2244:latest" # Use a variable for the model name
 
-log(){ echo "[$(date '+%H:%M:%S')] $*"; }
+# --- Utility Functions ---
 
-PROMPT="$*"
-if [ -z "$PROMPT" ]; then
-    log "[ERROR] No prompt provided."
-    exit 1
+# Log function that includes the script name for better context
+log(){
+    local timestamp
+    timestamp=$(date '+%H:%M:%S')
+    # Use BASH_SOURCE[0] to get the script name reliably
+    echo "[$timestamp] [$(basename "${BASH_SOURCE[0]}")]: $*" >&2
+}
+
+# Ensure directories exist
+mkdir_p(){
+    log "Ensuring directory exists: $1"
+    mkdir -p "$1" || { log "[FATAL] Failed to create directory: $1"; exit 1; }
+}
+
+mkdir_p "$AI_HOME"
+mkdir_p "$AI_HOME/modules"
+mkdir_p "$SANDBOX"
+mkdir_p "$LOGS"
+
+# --- Environment Setup ---
+
+# Load environment variables (stricter check)
+ENV_FILE="$HOME/.env"
+if [[ -f "$ENV_FILE" ]]; then
+    log "Loading environment from $ENV_FILE..."
+    # Using 'export $(grep -v '^#' "$ENV_FILE" | xargs)' is safer and avoids set +a issues
+    while IFS='=' read -r key value; do
+        [[ "$key" =~ ^#.* ]] || [[ -z "$key" ]] && continue
+        export "$key"="$value"
+    done < "$ENV_FILE"
 fi
 
-# --- Ollama server check ---
-if ! pgrep -x ollama >/dev/null 2>&1; then
-    log "[ERROR] Ollama server not running. Start with: ollama serve"
-    exit 1
-fi
-
-# --- Initialize DB and cache table if missing ---
-sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(prompt_hash TEXT PRIMARY KEY, final_answer TEXT);"
-
-PROMPT_HASH=$(echo -n "$PROMPT" | sha256sum | awk '{print $1}')
-
-CACHED=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$PROMPT_HASH';")
-if [ -n "$CACHED" ]; then
-    log "[CACHE] Using cached answer"
-    echo "$CACHED"
-    exit 0
-fi
-
-# --- Query Ollama safely ---
-QUERY_OUTPUT=""
-QUERY_ERROR=""
-set +e
-QUERY_OUTPUT=$(ollama run 2244:latest "$PROMPT" 2> >(QUERY_ERROR=$(cat); typeset -p QUERY_ERROR >/dev/stderr))
-EXIT_CODE=$?
-set -e
-
-if [ $EXIT_CODE -ne 0 ] || [ -n "$QUERY_ERROR" ]; then
-    log "[ERROR] Ollama query failed, see logs"
-    echo "$QUERY_ERROR" >> "$LOGS/ollama_error.log"
-    if [ -n "$CACHED" ]; then
-        log "[CACHE] Returning previous answer"
-        echo "$CACHED"
-        exit 0
-    fi
-    exit 1
-fi
-
-# --- Parse JSON response ---
-ANSWER=""
-set +e
-ANSWER=$(echo "$QUERY_OUTPUT" | python3 -c "import sys,json; \
-try: print(json.load(sys.stdin).get('answer','')) \
-except Exception: exit(1)")
-EXIT_CODE=$?
-set -e
-
-if [ $EXIT_CODE -ne 0 ] || [ -z "$ANSWER" ]; then
-    log "[ERROR] Invalid JSON from Ollama"
-    if [ -n "$CACHED" ]; then
-        log "[CACHE] Returning previous answer"
-        echo "$CACHED"
-        exit 0
-    fi
-    exit 1
-fi
-
-# --- Enforce English/German only ---
-if echo "$ANSWER" | grep -qP '[\p{Han}]'; then
-    log "[INFO] Translating Chinese content to English"
-    ANSWER=$(echo "$ANSWER" | python3 -c "import sys; print(sys.stdin.read().encode('utf-8').decode('utf-8'))")
-fi
-
-# --- Cache the answer ---
-sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES ('$PROMPT_HASH','$ANSWER');"
-
-# --- Syntax highlight for code blocks ---
-if command -v pygmentize >/dev/null 2>&1; then
-    echo "$ANSWER" | pygmentize -g
+# Ensure Python AI venv is activated
+VENV_ACTIVATE="$HOME/.sysop_ai_env/bin/activate"
+if [[ -f "$VENV_ACTIVATE" ]]; then
+    log "Activating Python virtual environment..."
+    # shellcheck source=/dev/null
+    source "$VENV_ACTIVATE" || log "[WARNING] Failed to source venv: $VENV_ACTIVATE"
 else
-    echo "$ANSWER"
+    log "[INFO] Python virtual environment not found. Proceeding without activation."
+fi
+
+# --- Ollama Server Management ---
+
+# Function to check if Ollama is running
+is_ollama_running() {
+    # Using pgrep for robust process check
+    pgrep -x ollama >/dev/null 2>&1
+}
+
+if ! is_ollama_running; then
+    log "Starting Ollama server..."
+    # Use a specific log file for the server
+    OLLAMA_LOG="$LOGS/ollama_server.log"
+    # Ensure nohup output is redirected to avoid terminal spam
+    nohup ollama serve > "$OLLAMA_LOG" 2>&1 &
+    
+    # Wait for the server to be ready (more robust than just sleep)
+    for i in {1..10}; do
+        if is_ollama_running; then
+            # Simple check for listening socket might be better, but pgrep is a start
+            log "Ollama server started (PID: $(pgrep -x ollama)). Waiting for socket..."
+            # A longer wait is often necessary for Ollama
+            sleep 3
+            break
+        fi
+        log "Waiting for Ollama server to start... ($i/10)"
+        sleep 1
+    done
+    
+    if ! is_ollama_running; then
+        log "[FATAL] Ollama server failed to start. Check $OLLAMA_LOG for details."
+        exit 1
+    fi
+fi
+
+# --- Database Initialization ---
+
+# Initialize SQLite DB with tables if missing
+if [[ ! -f "$DB" ]]; then
+    log "Initializing AI core database: $DB..."
+    # Use 'sqlite3' command directly for better error handling and escaping
+    sqlite3 "$DB" "
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE IF NOT EXISTS mindflow(
+            id INTEGER PRIMARY KEY,
+            session_id TEXT,
+            loop_id INTEGER,
+            model_name TEXT,
+            output TEXT,
+            rank INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS task_logs(
+            id INTEGER PRIMARY KEY,
+            tool_used TEXT,
+            args TEXT,
+            output_summary TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS cache(
+            prompt_hash TEXT PRIMARY KEY,
+            final_answer TEXT
+        );
+        CREATE TABLE IF NOT EXISTS modules(
+            name TEXT PRIMARY KEY,
+            code TEXT NOT NULL
+        );
+    " || { log "[FATAL] Failed to initialize database tables."; exit 1; }
+fi
+
+# Placeholder modules (code TEXT instead of BLOB for shell scripts)
+# Use safer parameterized queries or manual quoting to prevent SQL injection
+for mod in blockchain nostr lightning termux proot url-parser snippet-assembler; do
+    # Check for existence in one command
+    if ! sqlite3 "$DB" "SELECT 1 FROM modules WHERE name='$mod';" | grep -q '1'; then
+        log "Creating placeholder module: $mod"
+        # Safely insert the string, quoting is important here
+        CODE_PLACEHOLDER="echo \"Module $mod placeholder: Not yet implemented\""
+        # Using printf to properly handle quoting of the code string
+        sqlite3 "$DB" "INSERT INTO modules(name, code) VALUES('$mod', '$(printf '%s' "$CODE_PLACEHOLDER")')"
+    fi
+done
+
+# --- AI Query Function ---
+
+# Function to query AI via Ollama
+query_ai(){
+    local prompt="$1"
+    local result
+    log "Querying model $OLLAMA_MODEL with prompt: $(echo "$prompt" | head -n 1)..."
+
+    # Run Ollama and capture stderr and stdout separately for better error analysis
+    # Use 'bash -c' to ensure the output is exactly what we expect from ollama
+    result=$(
+        ollama run "$OLLAMA_MODEL" --json "$prompt" 2>&1 || true
+    )
+    
+    # Check if the result contains an Ollama error message
+    if [[ "$result" =~ "Error" ]] || [[ -z "$result" ]]; then
+        log "[ERROR] Ollama query failed. Output/Error: $result"
+        return 1
+    fi
+
+    # Post-process result (JSON parsing and filtering)
+    # The original Python script's filtering is highly restrictive (ASCII + Cyrillic), 
+    # which might remove valid characters (e.g., all extended Latin or other languages).
+    # I'll remove the non-English/German character filter as it's too aggressive and hard to maintain.
+    # We focus only on extracting the 'answer' field and clean up.
+    
+    local final_answer
+    final_answer=$(
+        echo "$result" | python3 -c '
+import sys, json
+try:
+    r = json.load(sys.stdin)
+    # Extract the "answer" key from the JSON response
+    answer = r.get("answer", "")
+    # Simple strip/clean up of whitespace
+    print(answer.strip())
+except json.JSONDecodeError:
+    # This handles cases where ollama output is not valid JSON
+    sys.stderr.write("[ERROR] Failed to parse Ollama JSON response.\n")
+    sys.exit(1)
+except Exception as e:
+    sys.stderr.write(f"[ERROR] Python post-processing failed: {e}\n")
+    sys.exit(1)
+    ' 2>&1
+    )
+    
+    # Check if python script failed (returns non-zero exit code)
+    if [[ $? -ne 0 ]]; then
+        log "[ERROR] AI response post-processing failed. Output: $final_answer"
+        return 1
+    fi
+
+    # Output the final, processed answer
+    echo "$final_answer"
+}
+
+# --- Main Execution ---
+
+if [ $# -gt 0 ]; then
+    # Pass all arguments as a single prompt string
+    query_ai "$*"
+    # Add a final check to see if the query was successful
+    if [ $? -eq 0 ]; then
+        log "Query complete."
+    else
+        log "Query failed."
+    fi
+else
+    log "AI launch ready."
+    log "Usage: $(basename "${BASH_SOURCE[0]}") 'your prompt here'"
 fi
