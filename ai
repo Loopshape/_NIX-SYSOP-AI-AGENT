@@ -1,93 +1,83 @@
 #!/usr/bin/env bash
-# AI 3.1 Termux/Proot CLI Installer & Launcher
+# Self-Updating AI CLI (English/German only)
 set -euo pipefail
 IFS=$'\n\t'
 
+# --- Directories & Variables ---
 AI_HOME="${HOME}/.local_ai"
-SWAP="$AI_HOME/swap"
-SANDBOX="$AI_HOME/sandbox"
+MODULES_DIR="$AI_HOME/modules"
 DB="$AI_HOME/core.db"
-mkdir -p "$SWAP" "$SANDBOX" "$AI_HOME/modules" "$HOME/logs"
+SANDBOX="$AI_HOME/sandbox"
+LOGS="$HOME/logs"
+REPO="https://github.com/YourUser/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto"
+
+mkdir -p "$AI_HOME" "$MODULES_DIR" "$SANDBOX" "$LOGS"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
-# --- Load Environment ---
-[ -f "$HOME/.env" ] && source "$HOME/.env"
-
-# --- Core Dependencies ---
-log "Installing core dependencies via apt..."
-apt update && apt install -y python3-full curl wget git unzip nodejs clang build-essential nano busybox
-
-# --- Ollama CLI ---
-if ! command -v ollama &>/dev/null; then
-    log "Downloading Ollama CLI..."
-    curl -L -o /tmp/ollama.tar.gz https://ollama-releases.s3.amazonaws.com/ollama-cli-latest-linux.tar.gz
-    tar -xzf /tmp/ollama.tar.gz -C /tmp
-    chmod +x /tmp/ollama
-    mv /tmp/ollama /usr/local/bin/
-    log "Ollama installed."
-fi
-
-# --- AI Core Script ---
-AI_SCRIPT="$AI_HOME/ai"
-if [ ! -f "$AI_SCRIPT" ]; then
-    log "Downloading AI CLI..."
-    curl -L -o "$AI_SCRIPT" https://raw.githubusercontent.com/user/ai/main/ai.sh
-    chmod +x "$AI_SCRIPT"
-    ln -sf "$AI_SCRIPT" /usr/local/bin/ai
-fi
+# --- Self-Heal: update AI CLI ---
+SELF="$AI_HOME/ai"
+log "🔄 Checking for updates..."
+curl -sL "$REPO/main/ai.sh" -o "$SELF.tmp" && chmod +x "$SELF.tmp" && mv "$SELF.tmp" "$SELF"
+alias ai="$SELF"
 
 # --- Pull Modules ---
-for m in blockchain nostr lightning termux url-parser snippet-assembler; do
-    curl -s -L -o "$AI_HOME/modules/$m.sh" "https://raw.githubusercontent.com/user/ai/modules/$m.sh"
+for mod in blockchain nostr lightning termux url-parser snippet-assembler; do
+    curl -sL "$REPO/modules/$mod.sh" -o "$MODULES_DIR/$mod.sh"
+    chmod +x "$MODULES_DIR/$mod.sh"
 done
 
-# --- Self-Healing / Auto-Update ---
-echo -e "#!/usr/bin/env bash\ncurl -s https://raw.githubusercontent.com/user/ai/main/ai.sh -o $AI_SCRIPT && chmod +x $AI_SCRIPT" > "$AI_HOME/self_heal.sh"
-chmod +x "$AI_HOME/self_heal.sh"
+# --- Dependencies ---
+for cmd in python3 sqlite3 curl wget git unzip node npm ollama; do
+    if ! command -v "$cmd" &>/dev/null; then
+        log "Installing $cmd..."
+        case "$cmd" in
+            python3|sqlite3|curl|wget|git|unzip|node|npm)
+                apt install -y "$cmd"
+                ;;
+            ollama)
+                curl -L -o /tmp/ollama.tar.gz https://ollama-releases.s3.amazonaws.com/ollama-cli-latest-linux.tar.gz
+                tar -xzf /tmp/ollama.tar.gz -C /tmp
+                chmod +x /tmp/ollama
+                mv /tmp/ollama /usr/local/bin/
+                ;;
+        esac
+    fi
+done
 
-# --- Initialize Core DB ---
+# --- Initialize DB ---
 if [ ! -f "$DB" ]; then
-    log "Initializing AI core database..."
-    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS mindflow(id INTEGER PRIMARY KEY, session_id TEXT, loop_id INTEGER, model_name TEXT, output TEXT, rank INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
-    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS task_logs(id INTEGER PRIMARY KEY, tool_used TEXT, args TEXT, output_summary TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
-    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(prompt_hash TEXT PRIMARY KEY, final_answer TEXT);"
+    log "Initializing AI database..."
+    sqlite3 "$DB" "CREATE TABLE mindflow(id INTEGER PRIMARY KEY, session_id TEXT, model_name TEXT, output TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
+    sqlite3 "$DB" "CREATE TABLE cache(prompt_hash TEXT PRIMARY KEY, final_answer TEXT);"
 fi
 
-# --- Lightweight HTTP Server ---
-if ! pgrep -f "busybox httpd" > /dev/null; then
-    log "Starting lightweight HTTP server on port 80..."
-    busybox httpd -f -p 80 -h "$SANDBOX" &
-fi
-
-# --- Helper: SQLite Escape ---
-sqlite3_escape() { echo "$1" | sed "s/'/''/g"; }
-
-# --- User Prompt / Model Output ---
-PROMPT="$*"
+# --- Prompt ---
+PROMPT="${*:-}"
 if [ -z "$PROMPT" ]; then
     read -rp "Enter your prompt: " PROMPT
 fi
 
-MODEL="default-model"
-# Replace below with actual model call if needed
-OUTPUT="Simulated AI answer for: $PROMPT"
-
-# --- Language Filter: English/German Only ---
-LANG_FILTERED=$(echo "$OUTPUT" | sed 's/[^A-Za-z0-9äöüßÄÖÜ,.!?;:()"\x27 \t\n-]//g')
-if [ "$OUTPUT" != "$LANG_FILTERED" ]; then
-    log "⚠ Warning: output contained forbidden characters. Only English/German used."
-    OUTPUT="$LANG_FILTERED"
+# --- Cache Check ---
+HASH=$(echo -n "$PROMPT" | sha256sum | awk '{print $1}')
+CACHED=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$HASH';")
+if [ -n "$CACHED" ]; then
+    echo "$CACHED"
+    exit 0
 fi
 
-# --- Store in DB ---
-SESSION=$(uuidgen)
-sqlite3 "$DB" "INSERT INTO mindflow(session_id, loop_id, model_name, output) VALUES('$(sqlite3_escape "$SESSION")', 0, '$(sqlite3_escape "$MODEL")', '$(sqlite3_escape "$OUTPUT")');"
+# --- Generate via Ollama ---
+MODEL="default-model"
+RAW_OUTPUT=$(ollama generate "$MODEL" "$PROMPT" 2>/dev/null)
 
-# --- Store in Cache ---
-HASH=$(echo -n "$PROMPT" | sha256sum | awk '{print $1}')
-sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$(sqlite3_escape "$HASH")', '$(sqlite3_escape "$OUTPUT")');"
+# --- Language Filter ---
+FILTERED_OUTPUT=$(echo "$RAW_OUTPUT" | sed 's/[^A-Za-z0-9äöüßÄÖÜ,.!?;:()"\x27 \t\n-]//g')
+
+# --- Store Results ---
+SESSION=$(uuidgen)
+sqlite3 "$DB" "INSERT INTO mindflow(session_id, model_name, output) VALUES('$SESSION','$MODEL','$(echo "$FILTERED_OUTPUT" | sed "s/'/''/g")');"
+sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$HASH','$(echo "$FILTERED_OUTPUT" | sed "s/'/''/g")');"
 
 # --- Output ---
-echo "$OUTPUT"
-log "✅ AI CLI finished. Modules loaded: blockchain, nostr, lightning, termux, url-parser, snippet-assembler"
+echo "$FILTERED_OUTPUT"
+log "✅ AI CLI finished. English/German only enforced."
