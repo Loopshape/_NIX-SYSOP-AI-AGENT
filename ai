@@ -1,34 +1,60 @@
 #!/usr/bin/env bash
-# ~/.bin/ai — Bulletproof Ollama CLI wrapper
+# Bulletproof AI CLI for Termux + Proot
 set -euo pipefail
 IFS=$'\n\t'
 
-# --- Proot-safe Swap & tmpfs Acceleration ---
-SWAP_FILE="$HOME/.local_ai/swapfile"
-SWAP_SIZE="512M"  # Adjust size if needed
-TMPFS_DIR="$HOME/.local_ai/tmpfs"
+AI_HOME="${HOME}/.local_ai"
+SWAP="$AI_HOME/swap"         # unused in Termux
+SANDBOX="$AI_HOME/sandbox"
+TMPFS_DIR="$AI_HOME/tmpfs"
+DB="$AI_HOME/core.db"
+MODULES_DIR="$AI_HOME/modules"
 
+mkdir -p "$SANDBOX" "$TMPFS_DIR" "$MODULES_DIR"
+
+log(){ echo "[$(date '+%H:%M:%S')] $*"; }
+
+# ------------------------------
+# Environment
+# ------------------------------
+[ -f "$HOME/.env.local" ] && source "$HOME/.env.local"
+export DEBIAN_FRONTEND=noninteractive
+export LANG="en_US.UTF-8"
+
+# ------------------------------
+# Core dependencies
+# ------------------------------
+log "Installing core dependencies via apt..."
+sudo apt update
+sudo apt install -y python3-full git curl wget sqlite3 nodejs build-essential || true
+
+# ------------------------------
+# tmpfs sandbox (speed-up)
+# ------------------------------
 mkdir -p "$TMPFS_DIR"
+mount -t tmpfs -o size=256M tmpfs "$TMPFS_DIR" 2>/dev/null || log "⚠ tmpfs skipped (normal on Termux)"
 
-# Mount tmpfs for AI temp files
-if ! mountpoint -q "$TMPFS_DIR"; then
-    log "Mounting tmpfs for sandbox acceleration..."
-    mount -t tmpfs -o size=256M tmpfs "$TMPFS_DIR" 2>/dev/null || true
+# ------------------------------
+# Ollama CLI
+# ------------------------------
+if ! command -v ollama &>/dev/null; then
+    log "Downloading Ollama CLI..."
+    curl -fsSL -o /tmp/ollama.tar.gz "https://ollama-releases.s3.amazonaws.com/ollama-cli-latest-linux.tar.gz"
+    tar -xzf /tmp/ollama.tar.gz -C /tmp
+    chmod +x /tmp/ollama
+    sudo mv /tmp/ollama /usr/local/bin/
+    log "Ollama installed"
 fi
 
-# Enable swapfile if not already
-if [ ! -f "$SWAP_FILE" ]; then
-    log "Creating swapfile..."
-    dd if=/dev/zero of="$SWAP_FILE" bs=1M count=512
-    chmod 600 "$SWAP_FILE"
-    mkswap "$SWAP_FILE"
+# Start Ollama server if not running
+if ! pgrep -x ollama >/dev/null 2>&1; then
+    nohup ollama serve > "$HOME/logs/ollama_server.log" 2>&1 &
+    log "Ollama server started"
 fi
 
-if ! swapon --show | grep -q "$SWAP_FILE"; then
-    log "Activating swapfile..."
-    sudo swapon "$SWAP_FILE" || log "⚠ Could not activate swapfile"
-fi
-
+# ------------------------------
+# Modules download (safe)
+# ------------------------------
 MODULES=(
   blockchain
   nostr
@@ -40,40 +66,23 @@ MODULES=(
 )
 
 for m in "${MODULES[@]}"; do
-  URL="https://raw.githubusercontent.com/YourGitHubUser/YourRepo/main/modules/$m.sh"
-  log "Downloading module $m..."
-  curl -fsSL -o "$AI_HOME/modules/$m.sh" "$URL" || log "⚠ Failed to download $m"
+    URL="https://raw.githubusercontent.com/YourGitHubUser/YourRepo/main/modules/$m.sh"
+    OUT="$MODULES_DIR/$m.sh"
+    log "Downloading module $m..."
+    if curl -fsSL "$URL" -o "$OUT"; then
+        chmod +x "$OUT"
+    else
+        log "⚠ Failed to download module $m (404?)"
+        echo "# $m not available" > "$OUT"
+    fi
 done
 
-# Set inotify watches high for AI
-if [ -w /proc/sys/fs/inotify/max_user_watches ]; then
-    log "Setting inotify max_user_watches to 524288"
-    echo 524288 | sudo tee /proc/sys/fs/inotify/max_user_watches >/dev/null
-fi
-
-AI_HOME="${HOME}/.local_ai"
-DB="$AI_HOME/core.db"
-MODULES="$AI_HOME/modules"
-MODEL="${AI_MODEL:-2244:latest}"
-
-mkdir -p "$AI_HOME" "$MODULES"
-
-log() { echo -e "[\033[1;32m$(date '+%H:%M:%S')\033[0m] $*"; }
-
-# --- Load environment ---
-[ -f "$HOME/.env" ] && source "$HOME/.env"
-[ -f "$HOME/.env.local" ] && source "$HOME/.env.local"
-
-# --- Ensure Python3 ---
-if ! command -v python3 &>/dev/null; then
-    log "Installing python3-full..."
-    sudo apt update && sudo apt install -y python3-full
-fi
-
-# --- Initialize DB if missing ---
+# ------------------------------
+# SQLite DB setup
+# ------------------------------
 if [ ! -f "$DB" ]; then
-    log "Initializing AI core database..."
-    sqlite3 "$DB" <<SQL
+    log "Initializing core database..."
+    sqlite3 "$DB" <<'SQL'
 CREATE TABLE IF NOT EXISTS mindflow(
     id INTEGER PRIMARY KEY,
     session_id TEXT,
@@ -97,50 +106,25 @@ CREATE TABLE IF NOT EXISTS cache(
 SQL
 fi
 
-# --- Load modules ---
-for m in "$MODULES"/*.sh; do
-    [ -f "$m" ] && source "$m"
-done
-
-# --- Build prompt ---
-PROMPT="$*"
-if [ -z "$PROMPT" ]; then
-    log "Usage: ai 'your question or task'"
+# ------------------------------
+# AI query handler
+# ------------------------------
+query="$*"
+if [ -z "$query" ]; then
+    log "No query provided. Usage: ai 'your prompt'"
     exit 1
 fi
 
-# --- Check cache ---
-PROMPT_HASH=$(echo -n "$PROMPT" | sha256sum | awk '{print $1}')
-CACHED=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$PROMPT_HASH';")
-if [ -n "$CACHED" ]; then
-    echo "$CACHED"
-    exit 0
-fi
+# Force English/German only
+log "Querying AI (English/German only)..."
+response=$(curl -s -X POST "http://127.0.0.1:11434/ask" \
+    -H "Content-Type: application/json" \
+    -d "{\"prompt\":\"$query\",\"lang\":\"en,de\"}" || true)
 
-# --- Run Ollama ---
-OUTPUT=$(ollama run "$MODEL" --prompt "$PROMPT" 2>/dev/null || true)
-
-# --- Auto-translate Chinese to English ---
-if echo "$OUTPUT" | grep -P '[\p{Han}]' &>/dev/null; then
-    if command -v translate-cli &>/dev/null; then
-        OUTPUT=$(translate-cli -t en <<< "$OUTPUT")
-    fi
-fi
-
-# --- Restrict to English/German output ---
-OUTPUT=$(echo "$OUTPUT" | LANG=en_US.UTF-8 perl -pe 's/[\p{^Latin}\p{^Common}]//g')
-
-# --- Store in cache ---
-sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES ('$PROMPT_HASH', '$(echo "$OUTPUT" | sqlite3_escape)');"
-
-# --- Print result with optional syntax highlight ---
-if command -v pygmentize &>/dev/null && echo "$OUTPUT" | grep -qE '```'; then
-    echo "$OUTPUT" | pygmentize -f terminal256 -g
+# Validate JSON
+if echo "$response" | jq . >/dev/null 2>&1; then
+    echo "$response" | jq -r '.answer // empty'
 else
-    echo "$OUTPUT"
+    log "⚠ No valid JSON response. Check if Ollama server is running."
+    echo "$response"
 fi
-
-# --- Utility: escape string for SQLite ---
-sqlite3_escape() {
-    perl -MString::Escape -pe 's/([\'"\\])/\\$1/g'
-}
