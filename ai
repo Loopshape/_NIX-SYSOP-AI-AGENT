@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ~/.bin/ai — CLI with SQLite, syntax highlight, auto-detect input, auto-translate Chinese to English
+# ~/.bin/ai — CLI with SQLite, syntax highlight, auto-detect input, auto-translate Chinese to English, optional German output
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -34,7 +34,7 @@ init_db() {
     );"
 }
 
-# --- Syntax Highlight + Auto Translate Chinese to English ---
+# --- Syntax Highlight + Translate if needed ---
 highlight_output() {
     local text="$1"
     local lang="$2"
@@ -43,48 +43,55 @@ highlight_output() {
 import sys
 from rich.console import Console
 from rich.syntax import Syntax
-from googletrans import Translator
 
 console = Console()
-translator = Translator()
-output = """$text"""
-
-# Translate Chinese input/output to English if any
-if any('\u4e00' <= c <= '\u9fff' for c in output):
-    translation = translator.translate(output, dest='en').text
-    output = f"{output}\n\n[Translated to English]: {translation}"
-
-syntax = Syntax(output, "$lang", theme="monokai", line_numbers=True)
+syntax = Syntax("""$text""", "$lang", theme="monokai", line_numbers=True)
 console.print(syntax)
 EOF
 }
 
-# --- Detect language and translate input if Chinese ---
-detect_and_translate() {
+# --- Translate Chinese input to English ---
+translate_chinese() {
     local prompt="$1"
-    local translated
-
-    translated=$("$PYTHON_BIN" - <<PY
+    "$PYTHON_BIN" - <<PY
 from googletrans import Translator
 prompt = """$prompt"""
 translator = Translator()
 if any('\u4e00' <= c <= '\u9fff' for c in prompt):
-    translated_prompt = translator.translate(prompt, dest='en').text
+    translated = translator.translate(prompt, dest='en').text
 else:
-    translated_prompt = prompt
-print(translated_prompt)
+    translated = prompt
+print(translated)
 PY
-)
-    echo "$translated"
+}
+
+# --- Translate English output to German if requested ---
+translate_to_german() {
+    local text="$1"
+    "$PYTHON_BIN" - <<PY
+from googletrans import Translator
+text = """$text"""
+translator = Translator()
+translated = translator.translate(text, dest='de').text
+print(translated)
+PY
 }
 
 # --- Run AI prompt ---
 run_ai() {
     local prompt="$1"
-    local response lang
+    local response lang="text"
 
-    # Translate input if Chinese
-    prompt=$(detect_and_translate "$prompt")
+    # Detect German mode
+    if [[ "$prompt" =~ ^de: ]]; then
+        local german_mode=1
+        prompt="${prompt#de:}"  # Remove the de: prefix
+    else
+        german_mode=0
+    fi
+
+    # Translate Chinese input to English
+    prompt=$(translate_chinese "$prompt")
 
     # Example AI logic (replace with your AI engine)
     if [[ "$prompt" =~ "capital of Germany" ]]; then
@@ -98,6 +105,11 @@ run_ai() {
         lang="text"
     fi
 
+    # Translate output to German if flagged
+    if [[ "$german_mode" -eq 1 ]]; then
+        response=$(translate_to_german "$response")
+    fi
+
     highlight_output "$response" "$lang"
 
     # Log to cache
@@ -108,7 +120,7 @@ run_ai() {
 
 # --- Main ---
 if [ $# -lt 1 ]; then
-    echo "Usage: ai 'your prompt'"
+    echo "Usage: ai 'your prompt' (prefix with de: for German output)"
     exit 1
 fi
 
