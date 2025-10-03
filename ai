@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 # One-Shot AI CLI Installer / Updater for Termux + Proot + Ollama
+
 set -euo pipefail
 IFS=$'\n\t'
+
+#!/usr/bin/env bash
+# AI CLI wrapper — uses Ollama CLI directly
+PROMPT="$*"
+MODEL="2244:latest"   # change to your preferred model
+
+# Run the model and capture output
+ollama run "$MODEL" --prompt "$PROMPT"
 
 AI_HOME="$HOME/.local_ai"
 BIN_DIR="$HOME/.bin"
