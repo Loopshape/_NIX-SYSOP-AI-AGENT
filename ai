@@ -1,32 +1,137 @@
-# ---------- Populate modules from local repo ----------
-# Usage: ai --populate
-if [[ "${1:-}" == "--populate" ]]; then
-  log "Populating modules into DB from local repository..."
-  # Define local repo path
-  REPO_DIR="${HOME}/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto"
-  # Simple HMAC secret for module verification (store securely)
-  HMAC_SECRET="${AI_HMAC_SECRET:-supersecretkey}"
+#!/usr/bin/env bash
+# ~/.bin/ai - Local AI CLI (Termux/Proot compatible, English/German only)
 
-  for f in "$REPO_DIR"/modules/*.sh; do
-    [[ -f "$f" ]] || continue
-    name=$(basename "$f" .sh)
-    code=$(cat "$f")
-    # Compute HMAC for integrity
-    hmac=$(python3 -c "import hmac, hashlib; print(hmac.new(b'$HMAC_SECRET', b'''$code''', hashlib.sha256).hexdigest())")
-    log "Inserting module '$name' with HMAC $hmac"
-    python3 - <<PY
-import sqlite3, os
-db = os.path.expanduser("$DB")
-conn = sqlite3.connect(db)
-cur = conn.cursor()
-# Insert code as BLOB + store HMAC
-cur.execute("INSERT OR REPLACE INTO modules(name, code, last_update) VALUES(?,?,datetime('now'))",
-            (sys.argv[1], sys.argv[2].encode('utf-8')))
-conn.commit()
-conn.close()
-PY
+set -euo pipefail
+IFS=$'\n\t'
+
+# -----------------------------
+# CONFIG
+# -----------------------------
+AI_HOME="${HOME}/.local_ai"
+DB="$AI_HOME/core.db"
+HMAC_SECRET="replace-with-your-secret"
+mkdir -p "$AI_HOME/modules"
+
+log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
+# -----------------------------
+# ENV & PYTHON
+# -----------------------------
+# Activate venv if exists
+[ -f "$HOME/.sysop_ai_env/bin/activate" ] && source "$HOME/.sysop_ai_env/bin/activate"
+
+# -----------------------------
+# DB INIT
+# -----------------------------
+sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS modules(
+    name TEXT PRIMARY KEY,
+    code BLOB,
+    hmac TEXT,
+    last_update DATETIME DEFAULT CURRENT_TIMESTAMP
+);"
+sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(
+    prompt_hash TEXT PRIMARY KEY,
+    final_answer TEXT
+);"
+
+# -----------------------------
+# POPULATE MODULES FROM LOCAL FILES
+# -----------------------------
+populate_modules() {
+    for f in "$AI_HOME"/modules/*.sh; do
+        [[ -f "$f" ]] || continue
+        name=$(basename "$f" .sh)
+        code=$(<"$f")
+        hmac=$(python3 -c "import hmac, hashlib; print(hmac.new(b'$HMAC_SECRET', b'''$code''', hashlib.sha256).hexdigest())")
+        sqlite3 "$DB" "INSERT OR REPLACE INTO modules(name, code, hmac, last_update) VALUES('$name', quote('$code'), '$hmac', datetime('now'));"
+        log "Module '$name' added to DB"
     done
+}
 
-  log "✅ Module population complete."
-  exit 0
-fi
+# -----------------------------
+# RUN MODULE
+# -----------------------------
+run_module() {
+    module_name="$1"; shift
+    python3 - <<PY
+import sqlite3, hmac, hashlib, sys, os
+
+DB = os.path.expanduser("$DB")
+SECRET = "$HMAC_SECRET"
+mod_name = "$module_name"
+
+conn = sqlite3.connect(DB)
+cur = conn.cursor()
+cur.execute("SELECT code, hmac FROM modules WHERE name=?", (mod_name,))
+row = cur.fetchone()
+conn.close()
+
+if not row:
+    print(f"[ERROR] Module {mod_name} not found in DB")
+    sys.exit(1)
+
+code, stored_hmac = row
+computed_hmac = hmac.new(SECRET.encode('utf-8'), code, hashlib.sha256).hexdigest()
+
+if stored_hmac != computed_hmac:
+    print(f"[ERROR] HMAC mismatch for module {mod_name}! Aborting execution.")
+    sys.exit(1)
+
+# Execute the module
+exec(code)
+PY
+}
+
+# -----------------------------
+# MAIN QUERY HANDLER
+# -----------------------------
+query_ai() {
+    prompt="$1"
+    # only allow English/German prompts
+    if echo "$prompt" | grep -P "[\p{Han}]" >/dev/null; then
+        log "[!] Chinese characters detected. Translating to English..."
+        prompt=$(echo "$prompt" | python3 -c "import sys; print(sys.stdin.read().encode('ascii','ignore').decode())")
+    fi
+
+    # Check cache first
+    prompt_hash=$(echo -n "$prompt" | sha256sum | awk '{print $1}')
+    cached=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$prompt_hash';")
+    if [ -n "$cached" ]; then
+        echo "$cached"
+        return
+    fi
+
+    # Run Ollama AI
+    if ! pgrep -x ollama >/dev/null; then
+        log "Ollama not running. Starting server..."
+        nohup ollama serve > "$AI_HOME/ollama.log" 2>&1 &
+        sleep 2
+    fi
+
+    answer=$(ollama run 2244:latest --json "$prompt" 2>/dev/null | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('answer',''))")
+    if [ -z "$answer" ]; then
+        log "[ERROR] No valid JSON response. Check Ollama server."
+        return 1
+    fi
+
+    # Save to cache
+    sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$prompt_hash', quote('$answer'));"
+
+    echo "$answer"
+}
+
+# -----------------------------
+# CLI ENTRYPOINT
+# -----------------------------
+case "${1:-}" in
+    --populate)
+        populate_modules
+        ;;
+    --run)
+        shift
+        run_module "$@"
+        ;;
+    *)
+        query_ai "$*"
+        ;;
+esac
