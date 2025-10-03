@@ -3,6 +3,38 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# --- Proot-safe Swap & tmpfs Acceleration ---
+SWAP_FILE="$HOME/.local_ai/swapfile"
+SWAP_SIZE="512M"  # Adjust size if needed
+TMPFS_DIR="$HOME/.local_ai/tmpfs"
+
+mkdir -p "$TMPFS_DIR"
+
+# Mount tmpfs for AI temp files
+if ! mountpoint -q "$TMPFS_DIR"; then
+    log "Mounting tmpfs for sandbox acceleration..."
+    mount -t tmpfs -o size=256M tmpfs "$TMPFS_DIR" 2>/dev/null || true
+fi
+
+# Enable swapfile if not already
+if [ ! -f "$SWAP_FILE" ]; then
+    log "Creating swapfile..."
+    dd if=/dev/zero of="$SWAP_FILE" bs=1M count=512
+    chmod 600 "$SWAP_FILE"
+    mkswap "$SWAP_FILE"
+fi
+
+if ! swapon --show | grep -q "$SWAP_FILE"; then
+    log "Activating swapfile..."
+    sudo swapon "$SWAP_FILE" || log "⚠ Could not activate swapfile"
+fi
+
+# Set inotify watches high for AI
+if [ -w /proc/sys/fs/inotify/max_user_watches ]; then
+    log "Setting inotify max_user_watches to 524288"
+    echo 524288 | sudo tee /proc/sys/fs/inotify/max_user_watches >/dev/null
+fi
+
 AI_HOME="${HOME}/.local_ai"
 DB="$AI_HOME/core.db"
 MODULES="$AI_HOME/modules"
