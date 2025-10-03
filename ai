@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ~/.bin/ai — CLI with SQLite, syntax highlight, auto-detect input, auto-translate Chinese to English, optional German output
+# ~/.bin/ai — CLI with SQLite, syntax highlight, auto-detect English/German, auto-translate Chinese to English
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -34,7 +34,7 @@ init_db() {
     );"
 }
 
-# --- Syntax Highlight + Translate if needed ---
+# --- Syntax Highlight ---
 highlight_output() {
     local text="$1"
     local lang="$2"
@@ -65,7 +65,7 @@ print(translated)
 PY
 }
 
-# --- Translate English output to German if requested ---
+# --- Translate English output to German ---
 translate_to_german() {
     local text="$1"
     "$PYTHON_BIN" - <<PY
@@ -77,15 +77,24 @@ print(translated)
 PY
 }
 
+# --- Detect German in prompt ---
+detect_german() {
+    local prompt="$1"
+    if [[ "$prompt" =~ [äöüßÄÖÜ] ]]; then
+        return 0  # German detected
+    else
+        return 1  # Not German
+    fi
+}
+
 # --- Run AI prompt ---
 run_ai() {
     local prompt="$1"
     local response lang="text"
 
-    # Detect German mode
-    if [[ "$prompt" =~ ^de: ]]; then
-        local german_mode=1
-        prompt="${prompt#de:}"  # Remove the de: prefix
+    # Auto-detect German
+    if detect_german "$prompt"; then
+        german_mode=1
     else
         german_mode=0
     fi
@@ -120,7 +129,7 @@ run_ai() {
 
 # --- Main ---
 if [ $# -lt 1 ]; then
-    echo "Usage: ai 'your prompt' (prefix with de: for German output)"
+    echo "Usage: ai 'your prompt'"
     exit 1
 fi
 
