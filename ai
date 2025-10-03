@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# ~/.bin/ai - Bulletproof AI CLI for Termux + Proot + Local AI
-# Requires: python3-full, git, sqlite3, nodejs, curl, wget
-
+# ~/.bin/ai - AI CLI with syntax highlighting
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -73,7 +71,7 @@ fi
 
 PROMPT="$*"
 
-# Translate Chinese characters to English placeholder
+# Translate Chinese to English placeholder
 PROMPT=$(echo "$PROMPT" | sed 's/[\p{Han}]/[TRANSLATE TO EN]/g')
 
 # -------------------------
@@ -82,7 +80,7 @@ PROMPT=$(echo "$PROMPT" | sed 's/[\p{Han}]/[TRANSLATE TO EN]/g')
 PROMPT_HASH=$(echo -n "$PROMPT" | sha256sum | awk '{print $1}')
 CACHE=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$PROMPT_HASH';")
 if [ -n "$CACHE" ]; then
-    echo "$CACHE"
+    echo -e "$CACHE" | pygmentize -g || echo "$CACHE"
     exit 0
 fi
 
@@ -115,6 +113,10 @@ OUTPUT=$(python3 -c "$PYCODE" "$PROMPT")
 sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$PROMPT_HASH','$OUTPUT');"
 
 # -------------------------
-# Display output
+# Display output with syntax highlight
 # -------------------------
-echo "$OUTPUT"
+if command -v pygmentize >/dev/null 2>&1; then
+    echo -e "$OUTPUT" | pygmentize -g
+else
+    echo "$OUTPUT"
+fi
