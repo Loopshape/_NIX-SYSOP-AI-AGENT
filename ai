@@ -3,86 +3,45 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-AI_HOME="${HOME}/.local_ai"
-SWAP="$AI_HOME/swap"         # unused in Termux
-SANDBOX="$AI_HOME/sandbox"
-TMPFS_DIR="$AI_HOME/tmpfs"
-DB="$AI_HOME/core.db"
+AI_HOME="$HOME/.local_ai"
 MODULES_DIR="$AI_HOME/modules"
+AI_SCRIPT="$AI_HOME/ai"
+SWAP="$AI_HOME/swap"
+SANDBOX="$AI_HOME/sandbox"
+DB="$AI_HOME/core.db"
+MODEL="2244:latest"
 
-mkdir -p "$SANDBOX" "$TMPFS_DIR" "$MODULES_DIR"
+mkdir -p "$AI_HOME" "$MODULES_DIR" "$SWAP" "$SANDBOX"
 
-log(){ echo "[$(date '+%H:%M:%S')] $*"; }
+log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
-# ------------------------------
-# Environment
-# ------------------------------
+# Load environment variables
 [ -f "$HOME/.env.local" ] && source "$HOME/.env.local"
-export DEBIAN_FRONTEND=noninteractive
-export LANG="en_US.UTF-8"
 
-# ------------------------------
-# Core dependencies
-# ------------------------------
-log "Installing core dependencies via apt..."
-sudo apt update
-sudo apt install -y python3-full git curl wget sqlite3 nodejs build-essential || true
-
-# ------------------------------
-# tmpfs sandbox (speed-up)
-# ------------------------------
-mkdir -p "$TMPFS_DIR"
-mount -t tmpfs -o size=256M tmpfs "$TMPFS_DIR" 2>/dev/null || log "⚠ tmpfs skipped (normal on Termux)"
-
-# ------------------------------
-# Ollama CLI
-# ------------------------------
-if ! command -v ollama &>/dev/null; then
-    log "Downloading Ollama CLI..."
-    curl -fsSL -o /tmp/ollama.tar.gz "https://ollama-releases.s3.amazonaws.com/ollama-cli-latest-linux.tar.gz"
-    tar -xzf /tmp/ollama.tar.gz -C /tmp
-    chmod +x /tmp/ollama
-    sudo mv /tmp/ollama /usr/local/bin/
-    log "Ollama installed"
-fi
-
-# Start Ollama server if not running
-if ! pgrep -x ollama >/dev/null 2>&1; then
-    nohup ollama serve > "$HOME/logs/ollama_server.log" 2>&1 &
-    log "Ollama server started"
-fi
-
-# ------------------------------
-# Modules download (safe)
-# ------------------------------
-MODULES=(
-  blockchain
-  nostr
-  lightning
-  termux
-  proot
-  url-parser
-  snippet-assembler
-)
-
-for m in "${MODULES[@]}"; do
-    URL="https://raw.githubusercontent.com/YourGitHubUser/YourRepo/main/modules/$m.sh"
-    OUT="$MODULES_DIR/$m.sh"
-    log "Downloading module $m..."
-    if curl -fsSL "$URL" -o "$OUT"; then
-        chmod +x "$OUT"
-    else
-        log "⚠ Failed to download module $m (404?)"
-        echo "# $m not available" > "$OUT"
+# Mandatory dependencies
+for dep in python3-full git curl wget sqlite3 nodejs build-essential; do
+    if ! command -v "$dep" &>/dev/null; then
+        log "Installing missing $dep..."
+        sudo apt update && sudo apt install -y "$dep"
     fi
 done
 
-# ------------------------------
-# SQLite DB setup
-# ------------------------------
+# Pull modules safely (skip missing)
+MODULES=(blockchain nostr lightning termux proot url-parser snippet-assembler)
+for m in "${MODULES[@]}"; do
+    URL="https://raw.githubusercontent.com/Noorsanto/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto/main/modules/$m.sh"
+    OUT="$MODULES_DIR/$m.sh"
+    if ! curl -fsSL "$URL" -o "$OUT"; then
+        log "⚠ Module $m not found, creating placeholder"
+        echo "# placeholder for $m" > "$OUT"
+    fi
+    chmod +x "$OUT"
+done
+
+# Initialize SQLite DB if missing
 if [ ! -f "$DB" ]; then
-    log "Initializing core database..."
-    sqlite3 "$DB" <<'SQL'
+    log "Initializing AI core database..."
+    sqlite3 "$DB" <<SQL
 CREATE TABLE IF NOT EXISTS mindflow(
     id INTEGER PRIMARY KEY,
     session_id TEXT,
@@ -106,25 +65,29 @@ CREATE TABLE IF NOT EXISTS cache(
 SQL
 fi
 
-# ------------------------------
-# AI query handler
-# ------------------------------
-query="$*"
-if [ -z "$query" ]; then
-    log "No query provided. Usage: ai 'your prompt'"
+# Function: Run Ollama
+run_ollama() {
+    local prompt="$1"
+    # Translate Chinese to English automatically
+    if echo "$prompt" | grep -qP '[\x{4e00}-\x{9fff}]'; then
+        log "Detected Chinese input, translating to English..."
+        prompt="[Translate to English] $prompt"
+    fi
+    ollama run "$MODEL" --prompt "$prompt"
+}
+
+# Main
+if [ $# -eq 0 ]; then
+    log "Usage: ai 'your prompt here'"
     exit 1
 fi
 
-# Force English/German only
+QUERY="$*"
 log "Querying AI (English/German only)..."
-response=$(curl -s -X POST "http://127.0.0.1:11434/ask" \
-    -H "Content-Type: application/json" \
-    -d "{\"prompt\":\"$query\",\"lang\":\"en,de\"}" || true)
+OUTPUT=$(run_ollama "$QUERY")
 
-# Validate JSON
-if echo "$response" | jq . >/dev/null 2>&1; then
-    echo "$response" | jq -r '.answer // empty'
-else
-    log "⚠ No valid JSON response. Check if Ollama server is running."
-    echo "$response"
-fi
+# Save to cache
+HASH=$(echo -n "$QUERY" | sha256sum | awk '{print $1}')
+sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES ('$HASH', '$(echo "$OUTPUT" | sed "s/'/''/g")');"
+
+echo -e "$OUTPUT"
