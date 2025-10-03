@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ~/.bin/ai — CLI with SQLite, syntax highlight, and auto-translate Chinese to English
+# ~/.bin/ai — CLI with SQLite, syntax highlight, auto-detect input, auto-translate Chinese to English
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -49,7 +49,7 @@ console = Console()
 translator = Translator()
 output = """$text"""
 
-# Translate Chinese to English, keep original content
+# Translate Chinese input/output to English if any
 if any('\u4e00' <= c <= '\u9fff' for c in output):
     translation = translator.translate(output, dest='en').text
     output = f"{output}\n\n[Translated to English]: {translation}"
@@ -59,12 +59,34 @@ console.print(syntax)
 EOF
 }
 
+# --- Detect language and translate input if Chinese ---
+detect_and_translate() {
+    local prompt="$1"
+    local translated
+
+    translated=$("$PYTHON_BIN" - <<PY
+from googletrans import Translator
+prompt = """$prompt"""
+translator = Translator()
+if any('\u4e00' <= c <= '\u9fff' for c in prompt):
+    translated_prompt = translator.translate(prompt, dest='en').text
+else:
+    translated_prompt = prompt
+print(translated_prompt)
+PY
+)
+    echo "$translated"
+}
+
 # --- Run AI prompt ---
 run_ai() {
     local prompt="$1"
     local response lang
 
-    # Example AI logic (replace with real AI engine)
+    # Translate input if Chinese
+    prompt=$(detect_and_translate "$prompt")
+
+    # Example AI logic (replace with your AI engine)
     if [[ "$prompt" =~ "capital of Germany" ]]; then
         response="The capital of Germany is Berlin."
         lang="text"
