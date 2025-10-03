@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Strict AI CLI - English/German only, local modules, Ollama query
+# Strict AI CLI - English/German only, local modules, Ollama query, SQL BLOB cache, syntax-highlighted code
 set -euo pipefail
 IFS=$'\n\t'
 
-# === Paths ===
 AI_HOME="$HOME/.local_ai"
 MODULES="$AI_HOME/modules"
 DB="$AI_HOME/core.db"
@@ -12,21 +11,41 @@ mkdir -p "$MODULES" "$SANDBOX" "$HOME/logs"
 
 log(){ echo "[$(date '+%H:%M:%S')] $*"; }
 
-# === Load Environment ===
+# Load environment
 [ -f "$HOME/.env.local" ] && source "$HOME/.env.local"
 
-# === Verify Python3 ===
+# Verify Python3
 command -v python3 >/dev/null || { log "⚠ python3 not found"; exit 1; }
 
-# === Initialize SQLite DB ===
+# Initialize SQLite DB with BLOB columns
 if [ ! -f "$DB" ]; then
     log "📦 Initializing AI core database..."
-    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS mindflow(id INTEGER PRIMARY KEY, session_id TEXT, loop_id INTEGER, model_name TEXT, output TEXT, rank INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
-    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS task_logs(id INTEGER PRIMARY KEY, tool_used TEXT, args TEXT, output_summary TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
-    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(prompt_hash TEXT PRIMARY KEY, final_answer TEXT);"
+    sqlite3 "$DB" <<'SQL'
+CREATE TABLE IF NOT EXISTS mindflow(
+    id INTEGER PRIMARY KEY,
+    session_id TEXT,
+    loop_id INTEGER,
+    model_name TEXT,
+    output BLOB,
+    rank INTEGER,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS task_logs(
+    id INTEGER PRIMARY KEY,
+    tool_used TEXT,
+    args BLOB,
+    output_summary BLOB,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS cache(
+    prompt_hash TEXT PRIMARY KEY,
+    prompt BLOB,
+    final_answer BLOB
+);
+SQL
 fi
 
-# === Load local modules only ===
+# Load local modules
 MODULE_LIST=("blockchain" "nostr" "lightning" "termux" "proot" "url-parser" "snippet-assembler")
 for mod in "${MODULE_LIST[@]}"; do
     MOD_FILE="$MODULES/$mod.sh"
@@ -38,38 +57,43 @@ log(){ echo \"[\$(date '+%H:%M:%S')] [MODULE $mod] \$*\"; }" > "$MOD_FILE"
     }
 done
 
-# === Start Ollama server if not running ===
+# Start Ollama server if not running
 if ! pgrep -x ollama >/dev/null 2>&1; then
     log "🚀 Starting Ollama server..."
     nohup ollama serve > "$HOME/logs/ollama_server.log" 2>&1 &
     sleep 3
 fi
 
-# === AI Prompt ===
+# AI Prompt
 PROMPT="${1:-Hello AI}"
 log "🧠 Querying AI (English/German only): $PROMPT"
 
-# === Python code for Ollama query + cache ===
+# Python3 Ollama query + SQL BLOB cache + syntax-highlight
 python3 - <<'EOF' "$PROMPT"
 import sys, json, hashlib, subprocess, sqlite3, os
+from pygments import highlight
+from pygments.lexers import guess_lexer, PythonLexer
+from pygments.formatters import TerminalFormatter
 
 prompt = sys.argv[1]
 db = os.path.expanduser("~/.local_ai/core.db")
-
-# Hash for caching
 prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
+
 conn = sqlite3.connect(db)
 cur = conn.cursor()
+
+# Check cache
 cur.execute("SELECT final_answer FROM cache WHERE prompt_hash=?", (prompt_hash,))
 row = cur.fetchone()
 if row:
-    print(row[0])
+    cached = row[0].decode('utf-8') if isinstance(row[0], bytes) else row[0]
+    print(cached)
     sys.exit(0)
 
-# Call Ollama model safely
+# Query Ollama
 try:
     result = subprocess.run(
-        ["ollama", "run", "2244:latest", "", prompt],
+        ["ollama", "run", "2244:latest", "--json", prompt],
         capture_output=True, text=True, check=True
     )
     data = json.loads(result.stdout)
@@ -78,11 +102,28 @@ except Exception as e:
     answer = f"[ERROR] Ollama query failed: {e}"
 
 # Force English/German only
-if any(ord(c) > 255 for c in answer):
-    answer = "[INFO] Non-English/German characters removed."
-    
-# Store in cache
-cur.execute("INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES (?,?)", (prompt_hash, answer))
+answer = ''.join(c for c in answer if ord(c) < 256)
+
+# Syntax highlight code blocks if detected
+if "```" in answer:
+    try:
+        code_parts = answer.split("```")
+        highlighted = ""
+        for i, part in enumerate(code_parts):
+            if i % 2 == 1:
+                lexer = guess_lexer(part.strip() or "print('Hello')")
+                highlighted += highlight(part, lexer, TerminalFormatter())
+            else:
+                highlighted += part
+        answer = highlighted
+    except Exception:
+        pass
+
+# Store in cache as BLOB
+cur.execute(
+    "INSERT OR REPLACE INTO cache(prompt_hash, prompt, final_answer) VALUES (?,?,?)",
+    (prompt_hash, prompt.encode('utf-8'), answer.encode('utf-8'))
+)
 conn.commit()
 conn.close()
 
