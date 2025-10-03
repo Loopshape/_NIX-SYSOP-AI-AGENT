@@ -1,135 +1,99 @@
 #!/usr/bin/env bash
-# AI CLI - Termux + Proot + Local AI
-# Features:
-# - DB auto-init with cache fix
-# - Syntax highlighting (Monokai-dark)
-# - English/German output filter
-# - Works standalone
+# ai_launch.sh - Bootstrap + Self-Healing + Launch AI CLI with logging
 
+set -euo pipefail
 AI_HOME="$HOME/.local_ai"
-DB="$AI_HOME/core.db"
-mkdir -p "$AI_HOME"
+BIN_DIR="$HOME/.bin"
+AI_CLI="$BIN_DIR/ai"
+REPO_DIR="$HOME/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto"
+LOG_DIR="$AI_HOME/logs"
+LOG_FILE="$LOG_DIR/ai_boot.log"
 
-RESET="\033[0m"
-PINK="\033[95m"
-GREEN="\033[92m"
-ORANGE="\033[33m"
-CYAN="\033[96m"
-GRAY="\033[90m"
+mkdir -p "$LOG_DIR"
 
-log() { echo "[AI] $*"; }
+log() {
+    local timestamp
+    timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+    echo -e "[$timestamp] $*" | tee -a "$LOG_FILE"
+}
 
-prepare_db() {
-    if [ ! -f "$DB" ]; then
-        log "Initializing AI core database..."
-        sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS mindflow(
-            id INTEGER PRIMARY KEY,
-            session_id TEXT,
-            loop_id INTEGER,
-            model_name TEXT,
-            output TEXT,
-            rank INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        );"
-        sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS task_logs(
-            id INTEGER PRIMARY KEY,
-            tool_used TEXT,
-            args TEXT,
-            output_summary TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        );"
-        sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(
-            prompt_hash TEXT PRIMARY KEY,
-            final_answer TEXT
-        );"
+# ---- Dependencies ----
+install_with_apt() {
+    sudo apt-get update -y
+    sudo apt-get install -y python3-full sqlite3 curl wget git build-essential \
+        bash nodejs npm
+}
+
+install_with_brew() {
+    command -v brew >/dev/null 2>&1 && brew install python sqlite curl wget git node
+}
+
+install_with_pip() {
+    pip install --upgrade pip
+    pip install requests rich
+}
+
+bootstrap_deps() {
+    log "Checking mandatory dependencies..."
+    command -v python3 >/dev/null 2>&1 || install_with_apt
+    command -v sqlite3 >/dev/null 2>&1 || install_with_apt
+    command -v curl >/dev/null 2>&1 || install_with_apt
+    command -v wget >/dev/null 2>&1 || install_with_apt
+    command -v node >/dev/null 2>&1 || install_with_apt
+}
+
+# ---- Self-Healing CLI ----
+prepare_ai_cli() {
+    mkdir -p "$AI_HOME" "$BIN_DIR"
+    if [ ! -f "$AI_CLI" ]; then
+        log "Copying AI CLI from repo..."
+        cp "$REPO_DIR/ai" "$AI_CLI"
+        chmod +x "$AI_CLI"
+        log "✅ AI CLI installed"
     else
-        sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(
-            prompt_hash TEXT PRIMARY KEY,
-            final_answer TEXT
-        );"
+        if [ "$REPO_DIR/ai" -nt "$AI_CLI" ]; then
+            log "Updating AI CLI from repo..."
+            cp "$REPO_DIR/ai" "$AI_CLI"
+            chmod +x "$AI_CLI"
+            log "✅ AI CLI updated"
+        fi
     fi
 }
 
-highlight_code() {
-    local code="$1" lang="$2"
-    case "$lang" in
-        python)
-            code=$(echo "$code" | sed -E "s/([0-9]+)/${ORANGE}\1${RESET}/g")
-            code=$(echo "$code" | sed -E "s/\"([^\"]*)\"/${GREEN}\"\\1\"${RESET}/g; s/'([^']*)'/${GREEN}'\\1'${RESET}/g")
-            code=$(echo "$code" | sed -E "s/\\b(if|else|for|while|return|def|class|in|break|continue|import|from)\\b/${PINK}\1${RESET}/g")
-            code=$(echo "$code" | sed -E "s/#(.*)/${GRAY}#\1${RESET}/g")
-            ;;
-        javascript)
-            code=$(echo "$code" | sed -E "s/([0-9]+)/${ORANGE}\1${RESET}/g")
-            code=$(echo "$code" | sed -E "s/\"([^\"]*)\"/${GREEN}\"\\1\"${RESET}/g; s/'([^']*)'/${GREEN}'\\1'${RESET}/g")
-            code=$(echo "$code" | sed -E "s/\\b(if|else|for|while|return|function|var|let|const|import|from)\\b/${PINK}\1${RESET}/g")
-            code=$(echo "$code" | sed -E "s/\/\/(.*)/${GRAY}\/\/\1${RESET}/g")
-            ;;
-        bash)
-            code=$(echo "$code" | sed -E "s/([0-9]+)/${ORANGE}\1${RESET}/g")
-            code=$(echo "$code" | sed -E "s/\"([^\"]*)\"/${GREEN}\"\\1\"${RESET}/g; s/'([^']*)'/${GREEN}'\\1'${RESET}/g")
-            code=$(echo "$code" | sed -E "s/\\b(if|else|for|while|function|return|do|done)\\b/${CYAN}\1${RESET}/g")
-            code=$(echo "$code" | sed -E "s/#(.*)/${GRAY}#\1${RESET}/g")
-            ;;
-        c|cpp)
-            code=$(echo "$code" | sed -E "s/([0-9]+)/${ORANGE}\1${RESET}/g")
-            code=$(echo "$code" | sed -E "s/\"([^\"]*)\"/${GREEN}\"\\1\"${RESET}/g; s/'([^']*)'/${GREEN}'\\1'${RESET}/g")
-            code=$(echo "$code" | sed -E "s/\\b(int|float|double|char|return|if|else|for|while|void|struct)\\b/${PINK}\1${RESET}/g")
-            code=$(echo "$code" | sed -E "s/\/\/(.*)/${GRAY}\/\/\1${RESET}/g; s/\/\*(.*)\*\//${GRAY}\/\1\/${RESET}/g")
-            ;;
-        *)
-            code=$(echo "$code" | sed "s/^/${CYAN}/;s/$/${RESET}/")
-            ;;
-    esac
-    echo -e "$code"
+# ---- Self-Healing Modules ----
+update_modules() {
+    mkdir -p "$AI_HOME/modules"
+    for mod in blockchain nostr lightning termux proot url-parser snippet-assembler; do
+        repo_mod="$REPO_DIR/modules/$mod.sh"
+        local_mod="$AI_HOME/modules/$mod.sh"
+        if [ ! -f "$local_mod" ] || [ "$repo_mod" -nt "$local_mod" ]; then
+            log "Updating module $mod..."
+            cp "$repo_mod" "$local_mod"
+            chmod +x "$local_mod"
+            log "✅ Module $mod updated"
+        fi
+    done
 }
 
-process_output() {
-    local text="$1"
-    local in_code=0 lang=""
-    while IFS= read -r line; do
-        if [[ "$line" =~ ^\`\`\` ]]; then
-            if [ $in_code -eq 0 ]; then
-                in_code=1
-                lang=$(echo "$line" | cut -d'`' -f4)
-            else
-                in_code=0
-            fi
-            continue
-        fi
-        # Allow only English/German chars
-        line=$(echo "$line" | sed 's/[^a-zA-Z0-9äöüÄÖÜß[:punct:] ]//g')
-        if [ $in_code -eq 1 ]; then
-            highlight_code "$line" "$lang"
-        else
-            echo -e "$line"
-        fi
-    done <<< "$text"
+# ---- Launch CLI ----
+launch_ai() {
+    if [ $# -eq 0 ]; then
+        log "Usage: ai_launch.sh 'your prompt'"
+        exit 1
+    fi
+    log "Launching AI CLI with prompt: $*"
+    "$AI_CLI" "$@"
+    log "AI CLI finished execution"
 }
 
 main() {
-    prepare_db
-    if [ -z "$1" ]; then
-        echo "Usage: ai '<your prompt>'"
-        exit 1
-    fi
-    PROMPT="$*"
-    log "Processing prompt: $PROMPT"
-
-    # hash for caching
-    HASH=$(echo -n "$PROMPT" | sha1sum | cut -d' ' -f1)
-    CACHED=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$HASH';")
-    if [ -n "$CACHED" ]; then
-        log "Loaded from cache."
-        process_output "$CACHED"
-        exit 0
-    fi
-
-    # call ollama
-    OUTPUT=$(ollama run llama2 "$PROMPT")
-    process_output "$OUTPUT"
-
-    sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$HASH', '$(echo "$OUTPUT" | sed "s/'/''/g")');"
+    log "🔍 Bootstrapping AI environment..."
+    bootstrap_deps
+    install_with_brew || true
+    install_with_pip || true
+    prepare_ai_cli
+    update_modules
+    launch_ai "$@"
 }
 
 main "$@"
