@@ -1,111 +1,120 @@
 #!/usr/bin/env bash
-# ~/.bin/ai - Bulletproof Local AI CLI
+# ~/.bin/ai - Bulletproof AI CLI for Termux + Proot + Local AI
+# Requires: python3-full, git, sqlite3, nodejs, curl, wget
+
 set -euo pipefail
 IFS=$'\n\t'
 
 AI_HOME="$HOME/.local_ai"
 DB="$AI_HOME/core.db"
-SANDBOX="$AI_HOME/sandbox"
+MODULES_DIR="$AI_HOME/modules"
+LOGS="$HOME/logs"
 
-log() { echo "[$(date '+%H:%M:%S')] $*"; }
+mkdir -p "$AI_HOME" "$MODULES_DIR" "$LOGS"
 
-# Load environment variables
-[ -f "$HOME/.env.local" ] && set -a && source "$HOME/.env.local" && set +a
-log "🔑 Environment loaded from ~/.env.local"
+log() { echo "[AI $(date '+%H:%M:%S')] $*"; }
 
-# Ensure core directories exist
-mkdir -p "$AI_HOME" "$SANDBOX"
+# -------------------------
+# Ensure DB tables exist
+# -------------------------
+sqlite3 "$DB" <<SQL
+CREATE TABLE IF NOT EXISTS mindflow(
+    id INTEGER PRIMARY KEY,
+    session_id TEXT,
+    loop_id INTEGER,
+    model_name TEXT,
+    output TEXT,
+    rank INTEGER,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS task_logs(
+    id INTEGER PRIMARY KEY,
+    tool_used TEXT,
+    args TEXT,
+    output_summary TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS cache(
+    prompt_hash TEXT PRIMARY KEY,
+    final_answer TEXT
+);
+SQL
 
-# --- Check Python & SQLite ---
-if ! command -v python3 >/dev/null; then
-    log "[ERROR] python3 not found!"
-    exit 1
+# -------------------------
+# Load local modules
+# -------------------------
+MODULES=("blockchain" "nostr" "lightning" "termux" "proot" "url-parser" "snippet-assembler")
+for m in "${MODULES[@]}"; do
+    MODULE_FILE="$MODULES_DIR/$m.sh"
+    if [ -f "$MODULE_FILE" ]; then
+        source "$MODULE_FILE"
+    else
+        log "⚠ Module $m not found, creating placeholder"
+        echo "# placeholder for $m" > "$MODULE_FILE"
+    fi
+done
+
+# -------------------------
+# Start Ollama if not running
+# -------------------------
+if ! pgrep -x ollama >/dev/null 2>&1; then
+    log "Starting Ollama server..."
+    nohup ollama serve > "$LOGS/ollama_server.log" 2>&1 &
+    sleep 2
 fi
-if ! command -v sqlite3 >/dev/null; then
-    log "[ERROR] sqlite3 not found!"
-    exit 1
-fi
 
-# --- Initialize core DB if missing ---
-if [ ! -f "$DB" ]; then
-    log "📦 Initializing AI core database..."
-    sqlite3 "$DB" "
-    CREATE TABLE mindflow(
-        id INTEGER PRIMARY KEY,
-        session_id TEXT,
-        loop_id INTEGER,
-        model_name TEXT,
-        output TEXT,
-        rank INTEGER,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE task_logs(
-        id INTEGER PRIMARY KEY,
-        tool_used TEXT,
-        args TEXT,
-        output_summary TEXT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE cache(
-        prompt_hash TEXT PRIMARY KEY,
-        final_answer TEXT
-    );"
-fi
-
-# --- Check Ollama server ---
-OLLAMA_PID=$(pgrep -x ollama || true)
-if [ -z "$OLLAMA_PID" ]; then
-    log "🚀 Starting Ollama server..."
-    nohup ollama serve > "$HOME/logs/ollama_server.log" 2>&1 &
-    sleep 3
-fi
-
-# --- Command processing ---
-if [ $# -lt 1 ]; then
-    log "[ERROR] No prompt provided. Usage: ai 'your prompt here'"
+# -------------------------
+# Preprocess prompt
+# -------------------------
+if [ $# -eq 0 ]; then
+    log "Usage: ai 'your prompt here'"
     exit 1
 fi
 
 PROMPT="$*"
-# Only English/German allowed
-LANG_CHECK=$(echo "$PROMPT" | grep -P "[\p{Han}\p{Katakana}\p{Hiragana}]")
-if [ -n "$LANG_CHECK" ]; then
-    log "[INFO] Chinese/Korean/Japanese detected in prompt, translating to English..."
-    PROMPT="Translate to English: $PROMPT"
-fi
 
-# --- Cache lookup ---
+# Translate Chinese characters to English placeholder
+PROMPT=$(echo "$PROMPT" | sed 's/[\p{Han}]/[TRANSLATE TO EN]/g')
+
+# -------------------------
+# Check cache first
+# -------------------------
 PROMPT_HASH=$(echo -n "$PROMPT" | sha256sum | awk '{print $1}')
-CACHED=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$PROMPT_HASH';")
-if [ -n "$CACHED" ]; then
-    echo "$CACHED"
+CACHE=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$PROMPT_HASH';")
+if [ -n "$CACHE" ]; then
+    echo "$CACHE"
     exit 0
 fi
 
-# --- Run Ollama ---
-RESPONSE=$(ollama run 2244:latest --json "$PROMPT" 2>/dev/null || true)
-if [ -z "$RESPONSE" ]; then
-    log "[ERROR] No valid JSON response from Ollama. Is the server running?"
-    exit 1
-fi
-
-# --- Extract answer ---
-ANSWER=$(python3 - <<PYTHON
-import sys, json
+# -------------------------
+# Query Ollama safely
+# -------------------------
+OUTPUT=""
+PYCODE=$(cat <<'EOF'
+import subprocess, json, sys
+prompt = sys.argv[1]
 try:
-    r=json.loads('''$RESPONSE''')
-    print(r.get('answer',''))
-except Exception:
-    sys.exit(1)
-PYTHON
+    result = subprocess.run(
+        ["ollama", "run", "2244:latest", "--json", prompt],
+        capture_output=True, text=True, check=True
+    )
+    data = json.loads(result.stdout)
+    print(data.get("answer", ""))
+except subprocess.CalledProcessError:
+    print("[ERROR] Ollama query failed")
+except json.JSONDecodeError:
+    print("[ERROR] Invalid JSON from Ollama")
+EOF
 )
-if [ -z "$ANSWER" ]; then
-    log "[ERROR] Ollama returned empty answer."
-    exit 1
-fi
 
-# --- Save to cache ---
-sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$PROMPT_HASH','$ANSWER');"
+OUTPUT=$(python3 -c "$PYCODE" "$PROMPT")
 
-# --- Output ---
-echo "$ANSWER"
+# -------------------------
+# Save to cache
+# -------------------------
+sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$PROMPT_HASH','$OUTPUT');"
+
+# -------------------------
+# Display output
+# -------------------------
+echo "$OUTPUT"
