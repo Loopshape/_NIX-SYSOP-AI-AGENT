@@ -1,94 +1,46 @@
 #!/usr/bin/env bash
-# AI 3.1 Launcher - Local Repo + Sandbox + .env.local automatisch geladen
-
 set -euo pipefail
 IFS=$'\n\t'
 
 AI_HOME="$HOME/.local_ai"
-SANDBOX="$AI_HOME/sandbox"
 DB="$AI_HOME/core.db"
-PROOT_DISTRO="debian"
-MODULES=(blockchain nostr lightning termux proot url-parser snippet-assembler)
-LOCAL_REPO="$HOME/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto"
-
-mkdir -p "$AI_HOME/modules" "$SANDBOX"
-
 log(){ echo "[$(date '+%H:%M:%S')] $*"; }
 
-# --- Load .env.local automatically ---
-ENV_FILE="$LOCAL_REPO/.env.local"
-if [ -f "$ENV_FILE" ]; then
-    log "🔑 Lade Umgebungsvariablen aus $ENV_FILE..."
-    set -a
-    source "$ENV_FILE"
-    set +a
-else
-    log "⚠ $ENV_FILE nicht gefunden"
-fi
+# --- 1. Load environment variables ---
+[ -f "$HOME/.env" ] && set -a && source "$HOME/.env" && set +a
 
-# --- Debian Proot Setup ---
-log "🔍 Prüfe Debian RootFS..."
-if ! proot-distro list | grep -q "^$PROOT_DISTRO"; then
-    log "⚠ Debian nicht installiert, starte Installation..."
-    proot-distro install $PROOT_DISTRO
-else
-    log "ℹ Debian ist bereits installiert."
-fi
-
-# Dummy .empty für Proot
-EMPTY_FILE="$HOME/.proot-distros/$PROOT_DISTRO/sys/.empty"
-mkdir -p "$(dirname "$EMPTY_FILE")"
-[ ! -f "$EMPTY_FILE" ] && touch "$EMPTY_FILE" && log "✅ Dummy .empty erstellt"
-
-# --- Dependencies via apt / brew / npm / pip / curl / wget ---
-for cmd in apt brew npm pip curl wget python3; do
-    if ! command -v $cmd &>/dev/null; then
-        log "ℹ $cmd nicht gefunden, Installation..."
-        case $cmd in
-            brew) /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true;;
-            npm) proot-distro login $PROOT_DISTRO -- bash -c "apt install -y npm";;
-            pip) proot-distro login $PROOT_DISTRO -- bash -c "apt install -y python3-pip";;
-            curl|wget|python3) proot-distro login $PROOT_DISTRO -- bash -c "apt install -y $cmd";;
-        esac
-    fi
-done
-
-# --- Load modules from local repo into sandbox ---
-for m in "${MODULES[@]}"; do
-    LOCAL_FILE="$LOCAL_REPO/modules/$m.sh"
-    if [ -f "$LOCAL_FILE" ]; then
-        cp "$LOCAL_FILE" "$AI_HOME/modules/$m.sh"
-        chmod +x "$AI_HOME/modules/$m.sh"
-        log "✅ Modul $m geladen"
-        # Execute module inside sandbox with environment
-        bash -c "set -a; source $ENV_FILE; bash $AI_HOME/modules/$m.sh"
-    else
-        log "⚠ Modul $m fehlt in $LOCAL_REPO/modules"
-    fi
-done
-
-# --- Self-Healing Script ---
-cat > "$AI_HOME/self_heal.sh" <<EOF
-#!/usr/bin/env bash
-cp $LOCAL_REPO/ai ~/.local_ai/ai
-chmod +x ~/.local_ai/ai
-EOF
-chmod +x "$AI_HOME/self_heal.sh"
-
-# --- Initialize Core DB ---
+# --- 2. First run setup (DB check) ---
 if [ ! -f "$DB" ]; then
-    log "ℹ Initialisiere AI Core DB..."
-    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS mindflow(id INTEGER PRIMARY KEY, session_id TEXT, loop_id INTEGER, model_name TEXT, output TEXT, rank INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
-    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS task_logs(id INTEGER PRIMARY KEY, tool_used TEXT, args TEXT, output_summary TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
-    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(prompt_hash TEXT PRIMARY KEY, final_answer TEXT);"
+    log "First run detected — installing core dependencies..."
+    if command -v apt >/dev/null 2>&1; then
+        log "Installing dependencies via apt..."
+        sudo apt update -y
+        sudo apt install -y python3-full build-essential curl git unzip sqlite3
+    fi
+
+    mkdir -p "$AI_HOME/modules"
+    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS mindflow(
+        id INTEGER PRIMARY KEY,
+        session_id TEXT,
+        query TEXT,
+        response TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    );"
 fi
 
-# --- Start lightweight webserver in sandbox ---
-if ! pgrep -f "busybox httpd" > /dev/null; then
-    log "🌐 Starte HTTP Server auf Port 80..."
-    busybox httpd -f -p 80 -h "$SANDBOX" &
+# --- 3. Run prompt ---
+if [ $# -eq 0 ]; then
+    echo "Usage: ai 'your prompt here'"
+    exit 1
 fi
 
-log "✅ AI 3.1 bereit. Modules geladen: ${MODULES[*]}"
-log "Starte AI CLI..."
-"$AI_HOME/ai" "$@"
+PROMPT="$*"
+log "Running AI query: $PROMPT"
+
+# --- 4. Execute via Ollama ---
+if ! command -v ollama >/dev/null 2>&1; then
+    log "Error: Ollama CLI not found. Install Ollama first."
+    exit 1
+fi
+
+ollama run llama3 "$PROMPT"
