@@ -6,22 +6,24 @@ import { ReviewPanel } from './components/ReviewPanel';
 import { Loader } from './components/Loader';
 import { ErrorAlert } from './components/ErrorAlert';
 import { CodePanel } from './components/CodePanel';
-import { type ReviewItem } from './types';
+import { type ManagedReviewItem, ReviewItemStatus, type ReviewItem } from './types';
 import { reviewCode } from './services/geminiService';
 
 const App: React.FC = () => {
     const [file, setFile] = useState<File | null>(null);
     const [fileContent, setFileContent] = useState<string | null>(null);
     const [selectedFocuses, setSelectedFocuses] = useState<string[]>([]);
-    const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
+    const [managedReviewItems, setManagedReviewItems] = useState<ManagedReviewItem[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
 
     const handleFileChange = (selectedFile: File | null) => {
         setFile(selectedFile);
-        setReviewItems([]);
+        setManagedReviewItems([]);
         setError(null);
         setFileContent(null);
+        setHighlightedLine(null);
 
         if (selectedFile) {
             const reader = new FileReader();
@@ -44,17 +46,74 @@ const App: React.FC = () => {
 
         setIsLoading(true);
         setError(null);
-        setReviewItems([]);
+        setManagedReviewItems([]);
+        setHighlightedLine(null);
 
         try {
             const items = await reviewCode(fileContent, selectedFocuses);
-            setReviewItems(items);
+            setManagedReviewItems(items.map((item) => ({
+                ...item,
+                id: crypto.randomUUID(),
+                status: ReviewItemStatus.PENDING,
+                userComments: [],
+            })));
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An unknown error occurred during review.');
         } finally {
             setIsLoading(false);
         }
     };
+
+    const handleHighlightLine = (line: number | null) => {
+        setHighlightedLine(line);
+    };
+
+    const handleUpdateReviewStatus = (itemId: string, status: ReviewItemStatus) => {
+        setManagedReviewItems(prev =>
+            prev.map(item => item.id === itemId ? { ...item, status } : item)
+        );
+    };
+
+    const handleAcceptSuggestion = (itemId: string) => {
+        const itemToAccept = managedReviewItems.find(i => i.id === itemId);
+        if (!fileContent || !itemToAccept || !itemToAccept.suggestion || itemToAccept.line === null) {
+            return;
+        }
+
+        const lines = fileContent.split('\n');
+        const lineIndex = itemToAccept.line - 1;
+
+        if (lineIndex >= 0 && lineIndex < lines.length) {
+            const originalLine = lines[lineIndex];
+            const leadingWhitespace = originalLine.match(/^\s*/)?.[0] ?? '';
+            lines[lineIndex] = leadingWhitespace + itemToAccept.suggestion.trim();
+
+            setFileContent(lines.join('\n'));
+            handleUpdateReviewStatus(itemId, ReviewItemStatus.ACCEPTED);
+            setHighlightedLine(null);
+        }
+    };
+
+    const handleRejectSuggestion = (itemId: string) => {
+        handleUpdateReviewStatus(itemId, ReviewItemStatus.REJECTED);
+        setHighlightedLine(null);
+    };
+
+    const handleClearAllReviews = () => {
+        setManagedReviewItems([]);
+    };
+
+    const handleAddComment = (itemId: string, comment: string) => {
+        if (!comment.trim()) return;
+        setManagedReviewItems(prev =>
+            prev.map(item =>
+                item.id === itemId
+                    ? { ...item, userComments: [...item.userComments, comment] }
+                    : item
+            )
+        );
+    };
+
 
     return (
         <div className="min-h-screen">
@@ -71,15 +130,16 @@ const App: React.FC = () => {
                         selectedFocuses={selectedFocuses}
                         onFocusChange={setSelectedFocuses}
                     />
-                    
+
                     {error && <ErrorAlert message={error} onClose={() => setError(null)} />}
-                    
+
                     {fileContent && (
-                        <CodePanel 
-                            code={fileContent} 
+                        <CodePanel
+                            code={fileContent}
                             fileName={file?.name ?? ''}
                             onCodeChange={handleCodeChange}
-                            reviewItems={reviewItems}
+                            reviewItems={managedReviewItems}
+                            highlightedLine={highlightedLine}
                         />
                     )}
 
@@ -88,8 +148,17 @@ const App: React.FC = () => {
                             <Loader />
                         </div>
                     )}
-                    
-                    {reviewItems.length > 0 && <ReviewPanel items={reviewItems} />}
+
+                    {managedReviewItems.length > 0 &&
+                        <ReviewPanel
+                            items={managedReviewItems}
+                            onHighlight={handleHighlightLine}
+                            onAccept={handleAcceptSuggestion}
+                            onReject={handleRejectSuggestion}
+                            onClearAll={handleClearAllReviews}
+                            onAddComment={handleAddComment}
+                        />
+                    }
                 </div>
             </main>
         </div>

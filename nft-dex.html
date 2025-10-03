@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grid12 3D DEX Dashboard</title>
+<style>
+    :root {
+        --bg-dark: #0a0a0f; 
+        --panel-bg: rgba(20, 25, 45, 0.85); 
+        --text-light: #e2e8f0; 
+        --accent-blue: #3b82f6; 
+        --accent-green: #10b981; 
+        --accent-red: #ef4444; 
+        --accent-purple: #8b5cf6;
+        --accent-cyan: #06b6d4;
+        --border-color: #334155;
+        --panel-glow: rgba(59, 130, 246, 0.15);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+        font-family: 'Consolas', 'Courier New', monospace; 
+        background: var(--bg-dark); 
+        color: var(--text-light); 
+        overflow: hidden;
+        background-image: 
+            radial-gradient(circle at 10% 20%, rgba(59, 130, 246, 0.05) 0%, transparent 20%),
+            radial-gradient(circle at 90% 80%, rgba(139, 92, 246, 0.05) 0%, transparent 20%);
+    }
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        grid-template-rows: 70px 1fr 1fr 200px;
+        height: 100vh;
+        gap: 12px;
+        padding: 12px;
+    }
+    .panel { 
+        background: var(--panel-bg); 
+        border: 1px solid var(--border-color); 
+        border-radius: 12px; 
+        padding: 15px; 
+        overflow: hidden; 
+        display: flex; 
+        flex-direction: column; 
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        backdrop-filter: blur(10px);
+        transition: all 0.3s ease;
+    }
+    .panel:hover {
+        border-color: var(--accent-blue);
+        box-shadow: 0 0 15px var(--panel-glow);
+    }
+    .panel h3 { 
+        margin-top: 0; 
+        margin-bottom: 10px; 
+        color: var(--accent-cyan); 
+        border-bottom: 1px solid var(--border-color); 
+        padding-bottom: 8px; 
+        font-size: 1.1em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .panel h3::before {
+        content: "▶";
+        font-size: 0.8em;
+        color: var(--accent-green);
+    }
+    #header { 
+        grid-column: 1 / -1; 
+        grid-row: 1; 
+        text-align: center; 
+        color: var(--accent-cyan); 
+        font-size: 1.8em; 
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 15px;
+        background: linear-gradient(90deg, rgba(20,25,45,0.9) 0%, rgba(30,35,55,0.9) 100%);
+        border: 1px solid var(--accent-blue);
+        position: relative;
+        overflow: hidden;
+    }
+    #header::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.2), transparent);
+        animation: shimmer 8s infinite;
+    }
+    @keyframes shimmer {
+        0% { left: -100%; }
+        100% { left: 100%; }
+    }
+    #viewport { 
+        grid-column: 4 / 13; 
+        grid-row: 2 / 4; 
+        padding: 0; 
+        cursor: grab; 
+        position: relative;
+        overflow: hidden;
+        border: 1px solid var(--accent-blue);
+    }
+    #ollama-config { grid-column: 1 / 4; grid-row: 2; }
+    #dex-pool { grid-column: 1 / 4; grid-row: 3; }
+    #nft-pool { grid-column: 1 / 4; grid-row: 4; }
+    #system-log { grid-column: 4 / 13; grid-row: 4; }
+    
+    .log-content, .pool-content { 
+        flex-grow: 1; 
+        overflow-y: auto; 
+        font-size: 0.85em; 
+        white-space: pre-wrap;
+        line-height: 1.4;
+        background: rgba(10, 15, 25, 0.4);
+        border-radius: 6px;
+        padding: 10px;
+        font-family: 'Courier New', monospace;
+    }
+    .pool-content {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .wallet-card {
+        background: rgba(15, 20, 35, 0.7);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 10px;
+        transition: all 0.2s ease;
+    }
+    .wallet-card:hover {
+        border-color: var(--accent-blue);
+        background: rgba(25, 30, 50, 0.8);
+    }
+    .wallet-card.active {
+        border-color: var(--accent-green);
+        background: rgba(16, 185, 129, 0.1);
+        box-shadow: 0 0 8px rgba(16, 185, 129, 0.2);
+    }
+    .wallet-header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 5px;
+        font-weight: bold;
+        color: var(--accent-cyan);
+    }
+    .wallet-details {
+        font-size: 0.8em;
+        color: var(--text-light);
+    }
+    .config-item { margin-bottom: 15px; }
+    .config-item label { display: block; margin-bottom: 5px; color: var(--text-light); font-size: 0.9em; }
+    select, button, input {
+        width: 100%; 
+        padding: 10px; 
+        background: rgba(15, 20, 35, 0.7); 
+        color: var(--text-light);
+        border: 1px solid var(--border-color); 
+        border-radius: 6px; 
+        font-family: inherit;
+        transition: all 0.2s ease;
+    }
+    select:focus, input:focus {
+        outline: none;
+        border-color: var(--accent-blue);
+        box-shadow: 0 0 5px rgba(59, 130, 246, 0.3);
+    }
+    button { 
+        background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple)); 
+        color: white; 
+        font-weight: bold; 
+        cursor: pointer; 
+        margin-top: 10px; 
+        border: none;
+        position: relative;
+        overflow: hidden;
+    }
+    button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(59, 130, 246, 0.4);
+    }
+    button:active {
+        transform: translateY(0);
+    }
+    button:disabled {
+        background: var(--border-color);
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+    }
+    .status-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 8px;
+    }
+    .status-online { background: var(--accent-green); }
+    .status-offline { background: var(--accent-red); }
+    .status-processing { background: var(--accent-cyan); animation: pulse 1.5s infinite; }
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+    .control-row {
+        display: flex;
+        gap: 10px;
+        margin-top: 15px;
+    }
+    .control-row button {
+        flex: 1;
+        margin-top: 0;
+    }
+    #canvas-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 10;
+        background: radial-gradient(circle at center, transparent 30%, rgba(10, 15, 25, 0.7) 100%);
+    }
+    .stats-bar {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 10px;
+        font-size: 0.8em;
+        color: var(--accent-cyan);
+    }
+    .tooltip {
+        position: relative;
+        cursor: help;
+    }
+    .tooltip::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(15, 20, 35, 0.95);
+        color: var(--text-light);
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 0.8em;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s;
+        border: 1px solid var(--accent-blue);
+        z-index: 100;
+    }
+    .tooltip:hover::after {
+        opacity: 1;
+    }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.9.0/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+
+<div class="dashboard-grid">
+    <div id="header" class="panel">
+        <span>GRID12 3D DEX & NFT DASHBOARD</span>
+    </div>
+    
+    <div id="viewport" class="panel">
+        <canvas id="carouselCanvas"></canvas>
+        <div id="canvas-overlay"></div>
+    </div>
+
+    <div id="ollama-config" class="panel">
+        <h3>Ollama Config</h3>
+        <div class="config-item">
+            <label for="modelSelect">Select Model:</label>
+            <select id="modelSelect"></select>
+        </div>
+        <div class="config-item">
+            <label for="analysisType">Analysis Type:</label>
+            <select id="analysisType">
+                <option value="market">Market Analysis</option>
+                <option value="risk">Risk Assessment</option>
+                <option value="trend">Trend Prediction</option>
+                <option value="portfolio">Portfolio Optimization</option>
+            </select>
+        </div>
+        <button id="runAnalysisBtn">Run Analysis</button>
+        <div class="control-row">
+            <button id="resetViewBtn">Reset View</button>
+            <button id="autoRotateBtn">Auto Rotate: ON</button>
+        </div>
+        <div class="stats-bar">
+            <span>DEX Wallets: <span id="dexCount">12</span></span>
+            <span>NFT Wallets: <span id="nftCount">12</span></span>
+        </div>
+    </div>
+
+    <div id="dex-pool" class="panel">
+        <h3>DEX Pool (Focus)</h3>
+        <div id="dexPoolContent" class="pool-content">
+            <div class="wallet-card">
+                <div class="wallet-header">BTC</div>
+                <div class="wallet-details">AI-1 | 0x1a2b...3c4d</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="nft-pool" class="panel">
+        <h3>NFT Pool (Focus)</h3>
+        <div id="nftPoolContent" class="pool-content">
+            <div class="wallet-card">
+                <div class="wallet-header">NFT-A</div>
+                <div class="wallet-details">AI-1 | 0x5e6f...7g8h</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="system-log" class="panel">
+        <h3>
+            <span class="status-indicator status-online"></span>
+            System Log
+        </h3>
+        <div id="logContent" class="log-content"></div>
+        <div class="control-row">
+            <button id="clearLogBtn">Clear Log</button>
+            <button id="exportLogBtn">Export Log</button>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    // --- UI ELEMENTS ---
+    const viewport = document.getElementById('viewport');
+    const canvas = document.getElementById('carouselCanvas');
+    const logContent = document.getElementById('logContent');
+    const modelSelect = document.getElementById('modelSelect');
+    const runAnalysisBtn = document.getElementById('runAnalysisBtn');
+    const dexPoolContent = document.getElementById('dexPoolContent');
+    const nftPoolContent = document.getElementById('nftPoolContent');
+    const resetViewBtn = document.getElementById('resetViewBtn');
+    const autoRotateBtn = document.getElementById('autoRotateBtn');
+    const clearLogBtn = document.getElementById('clearLogBtn');
+    const exportLogBtn = document.getElementById('exportLogBtn');
+    const analysisType = document.getElementById('analysisType');
+    const dexCount = document.getElementById('dexCount');
+    const nftCount = document.getElementById('nftCount');
+
+    // --- LOGGING ---
+    function log(message, color = 'var(--text-light)', icon = 'ℹ') {
+        const time = new Date().toLocaleTimeString();
+        logContent.innerHTML += `<div style="color:${color}">[${time}] ${icon} ${message}</div>`;
+        logContent.scrollTop = logContent.scrollHeight;
+        
+        // Keep only last 100 log entries
+        const logs = logContent.querySelectorAll('div');
+        if (logs.length > 100) {
+            logs[0].remove();
+        }
+    }
+
+    // --- WEB3 & DATA SETUP ---
+    const mnemonic = "test test test test test test test test test test test junk";
+    const DEX = ["BTC","ETH","SOL","ADA","DOT","MATIC","XRP","LTC","BNB","ATOM","NEAR","FIL"];
+    const NFTS = ["NFT-A","NFT-B","NFT-C","NFT-D","NFT-E","NFT-F","NFT-G","NFT-H","NFT-I","NFT-J","NFT-K","NFT-L"];
+    const walletHD = ethers.HDNodeWallet.fromPhrase(mnemonic);
+    const dexWallets = DEX.map((t,i) => walletHD.derivePath(`m/44'/60'/0'/0/${i}`).address);
+    const nftWallets = NFTS.map((n,i) => walletHD.derivePath(`m/44'/60'/0'/1/${i}`).address);
+
+    // Wallet data with balances
+    const walletData = {
+        dex: DEX.map((t, i) => ({
+            symbol: t,
+            address: dexWallets[i],
+            balance: (Math.random() * 10).toFixed(4),
+            value: (Math.random() * 50000).toFixed(2),
+            change: (Math.random() * 20 - 10).toFixed(2)
+        })),
+        nft: NFTS.map((n, i) => ({
+            symbol: n,
+            address: nftWallets[i],
+            balance: Math.floor(Math.random() * 10),
+            value: (Math.random() * 1000).toFixed(2),
+            change: (Math.random() * 30 - 15).toFixed(2)
+        }))
+    };
+
+    // --- THREE.JS SCENE ---
+    let scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a0f);
+    let camera = new THREE.PerspectiveCamera(50, viewport.clientWidth / viewport.clientHeight, 0.1, 2000);
+    camera.position.z = 150;
+
+    let renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // Enhanced lighting
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(50, 50, 50);
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
+    scene.add(directionalLight);
+
+    const pointLight = new THREE.PointLight(0x3b82f6, 0.5, 500);
+    pointLight.position.set(0, 0, 100);
+    scene.add(pointLight);
+
+    // Create particle system for background
+    function createParticleSystem() {
+        const particleCount = 1000;
+        const particles = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+
+        for (let i = 0; i < particleCount * 3; i += 3) {
+            positions[i] = (Math.random() - 0.5) * 1000;
+            positions[i + 1] = (Math.random() - 0.5) * 1000;
+            positions[i + 2] = (Math.random() - 0.5) * 1000;
+
+            colors[i] = Math.random() * 0.5 + 0.5;
+            colors[i + 1] = Math.random() * 0.5 + 0.5;
+            colors[i + 2] = Math.random() * 0.5 + 0.5;
+        }
+
+        particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        particles.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const particleMaterial = new THREE.PointsMaterial({
+            size: 2,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.6
+        });
+
+        const particleSystem = new THREE.Points(particles, particleMaterial);
+        scene.add(particleSystem);
+        return particleSystem;
+    }
+
+    const particles = createParticleSystem();
+
+    function createCardMesh(text, color = 0x3b82f6, isHighlighted = false) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256; 
+        canvas.height = 384;
+        const ctx = canvas.getContext('2d');
+        
+        // Create gradient background
+        const gradient = ctx.createLinearGradient(0, 0, 256, 384);
+        gradient.addColorStop(0, isHighlighted ? '#1e293b' : '#0f172a');
+        gradient.addColorStop(1, isHighlighted ? '#334155' : '#1e293b');
+        
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 256, 384);
+        
+        // Add border
+        ctx.strokeStyle = isHighlighted ? `#${color.toString(16)}` : '#334155';
+        ctx.lineWidth = 8;
+        ctx.strokeRect(0, 0, 256, 384);
+        
+        // Add inner glow for highlighted cards
+        if (isHighlighted) {
+            ctx.shadowColor = `#${color.toString(16)}`;
+            ctx.shadowBlur = 20;
+            ctx.strokeStyle = `#${color.toString(16)}`;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(10, 10, 236, 364);
+            ctx.shadowBlur = 0;
+        }
+        
+        // Add text
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = 'bold 20px monospace';
+        ctx.textAlign = 'center';
+        
+        const lines = text.split('\n');
+        lines.forEach((line, i) => {
+            ctx.fillText(line, 128, 150 + i * 30);
+        });
+        
+        const texture = new THREE.CanvasTexture(canvas);
+        const geometry = new THREE.BoxGeometry(20, 30, 2);
+        const material = new THREE.MeshStandardMaterial({ 
+            map: texture, 
+            metalness: 0.3, 
+            roughness: 0.4,
+            emissive: isHighlighted ? new THREE.Color(color).multiplyScalar(0.1) : new THREE.Color(0x000000)
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.userData = { text, isHighlighted: false };
+        return mesh;
+    }
+
+    let dexGroup = new THREE.Group();
+    let nftGroup = new THREE.Group();
+    scene.add(dexGroup, nftGroup);
+
+    function positionCarousel(group, items, radius, yPos = 0, color) {
+        items.forEach((item, i) => {
+            const angle = (i / items.length) * Math.PI * 2;
+            const mesh = createCardMesh(item.text, color);
+            mesh.position.x = radius * Math.sin(angle);
+            mesh.position.z = radius * Math.cos(angle);
+            mesh.position.y = yPos;
+            mesh.lookAt(0, yPos, 0);
+            group.add(mesh);
+        });
+    }
+
+    const dexItems = DEX.map((t, i) => ({ 
+        text: `${t}\nAI-${i+1}\n${dexWallets[i].slice(0, 6)}...\n$${walletData.dex[i].value}` 
+    }));
+    const nftItems = NFTS.map((n, i) => ({ 
+        text: `${n}\nAI-${i+1}\n${nftWallets[i].slice(0, 6)}...\n${walletData.nft[i].balance} items` 
+    }));
+
+    positionCarousel(dexGroup, dexItems, 60, 20, 0x3b82f6);
+    positionCarousel(nftGroup, nftItems, 60, -20, 0x8b5cf6);
+
+    // --- INTERACTION & ANIMATION ---
+    let isDragging = false, 
+        previousMouseX = 0, 
+        targetDexRotation = 0, 
+        targetNftRotation = 0,
+        autoRotate = true,
+        highlightedCard = null;
+
+    function onDragStart(e) { 
+        isDragging = true; 
+        previousMouseX = e.clientX || e.touches[0].clientX; 
+        viewport.style.cursor = 'grabbing'; 
+    }
+    
+    function onDragMove(e) {
+        if (!isDragging) return;
+        const currentX = e.clientX || e.touches[0].clientX;
+        const deltaX = currentX - previousMouseX;
+        targetDexRotation += deltaX * 0.005;
+        targetNftRotation -= deltaX * 0.005;
+        previousMouseX = currentX;
+    }
+    
+    function onDragEnd() { 
+        isDragging = false; 
+        viewport.style.cursor = 'grab'; 
+    }
+
+    viewport.addEventListener('mousedown', onDragStart);
+    viewport.addEventListener('mousemove', onDragMove);
+    viewport.addEventListener('mouseup', onDragEnd);
+    viewport.addEventListener('mouseleave', onDragEnd);
+    
+    function updateFocus() {
+        [dexGroup, nftGroup].forEach((group, index) => {
+            let closestCard = null;
+            let minAngle = Math.PI * 2;
+            
+            group.children.forEach(card => {
+                const worldPos = new THREE.Vector3();
+                card.getWorldPosition(worldPos);
+                const angle = Math.atan2(worldPos.x, worldPos.z);
+                const camAngle = Math.atan2(camera.position.x, camera.position.z);
+                let diff = Math.abs(angle - camAngle);
+                if (diff > Math.PI) diff = Math.PI * 2 - diff;
+
+                // Remove highlight from all cards first
+                if (card.userData.isHighlighted) {
+                    const newMesh = createCardMesh(card.userData.text, index === 0 ? 0x3b82f6 : 0x8b5cf6, false);
+                    newMesh.position.copy(card.position);
+                    newMesh.rotation.copy(card.rotation);
+                    newMesh.userData = card.userData;
+                    newMesh.userData.isHighlighted = false;
+                    group.remove(card);
+                    group.add(newMesh);
+                }
+
+                if (diff < minAngle) {
+                    minAngle = diff;
+                    closestCard = group.children[group.children.indexOf(card)];
+                }
+            });
+
+            if (closestCard && minAngle < 0.2) {
+                // Highlight the closest card
+                const newMesh = createCardMesh(closestCard.userData.text, index === 0 ? 0x3b82f6 : 0x8b5cf6, true);
+                newMesh.position.copy(closestCard.position);
+                newMesh.rotation.copy(closestCard.rotation);
+                newMesh.userData = closestCard.userData;
+                newMesh.userData.isHighlighted = true;
+                group.remove(closestCard);
+                group.add(newMesh);
+                highlightedCard = newMesh;
+
+                // Update the content panel
+                const contentTarget = index === 0 ? dexPoolContent : nftPoolContent;
+                const walletIndex = group.children.indexOf(newMesh);
+                const wallet = index === 0 ? walletData.dex[walletIndex] : walletData.nft[walletIndex];
+                
+                contentTarget.innerHTML = `
+                    <div class="wallet-card active">
+                        <div class="wallet-header">${wallet.symbol}</div>
+                        <div class="wallet-details">
+                            ${index === 0 ? 
+                                `Balance: ${wallet.balance}<br>Value: $${wallet.value}<br>Change: ${wallet.change}%` :
+                                `Items: ${wallet.balance}<br>Value: $${wallet.value}<br>Change: ${wallet.change}%`
+                            }
+                        </div>
+                    </div>
+                `;
+            }
+        });
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        
+        if (autoRotate && !isDragging) {
+            targetDexRotation += 0.002;
+            targetNftRotation -= 0.002;
+        }
+        
+        dexGroup.rotation.y += (targetDexRotation - dexGroup.rotation.y) * 0.1;
+        nftGroup.rotation.y += (targetNftRotation - nftGroup.rotation.y) * 0.1;
+        
+        // Animate particles
+        particles.rotation.y += 0.0005;
+        particles.rotation.x += 0.0003;
+        
+        updateFocus();
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = viewport.clientWidth / viewport.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+    });
+
+    // --- OLLAMA INTEGRATION ---
+    async function fetchOllamaModels() {
+        try {
+            const response = await fetch('http://localhost:11434/api/tags');
+            if (!response.ok) throw new Error('Ollama server not responding.');
+            const data = await response.json();
+            modelSelect.innerHTML = data.models.map(m => `<option value="${m.name}">${m.name}</option>`).join('');
+            log('Successfully fetched Ollama models.', 'var(--accent-green)', '✓');
+        } catch (e) {
+            log(`Error fetching Ollama models: ${e.message}`, 'var(--accent-red)', '✗');
+            modelSelect.innerHTML = '<option>Could not connect to Ollama</option>';
+        }
+    }
+
+    async function runOllamaAnalysis() {
+        const selectedModel = modelSelect.value;
+        if (!selectedModel || selectedModel.startsWith('Could not')) {
+            log('Cannot run analysis: No Ollama model selected or available.', 'var(--accent-red)', '✗');
+            return;
+        }
+
+        runAnalysisBtn.disabled = true;
+        runAnalysisBtn.textContent = 'Analyzing...';
+        log(`Running ${analysisType.value} analysis with ${selectedModel}...`, 'var(--accent-cyan)', '⟳');
+
+        const prompt = `As a financial AI analyst, provide insights about:
+        DEX Pool Focus: ${dexPoolContent.textContent}
+        NFT Pool Focus: ${nftPoolContent.textContent}
+        
+        Analysis Type: ${analysisType.options[analysisType.selectedIndex].text}
+        Provide a concise, data-driven assessment with actionable insights.`;
+
+        try {
+            const response = await fetch('http://localhost:11434/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: selectedModel,
+                    prompt: prompt,
+                    stream: false
+                })
+            });
+            if (!response.ok) throw new Error('API request failed.');
+            const data = await response.json();
+            log(`AI Analysis (${selectedModel}): ${data.response}`, 'var(--accent-green)', '✓');
+        } catch (e) {
+            log(`AI analysis failed: ${e.message}`, 'var(--accent-red)', '✗');
+        } finally {
+            runAnalysisBtn.disabled = false;
+            runAnalysisBtn.textContent = 'Run Analysis';
+        }
+    }
+
+    // --- EVENT LISTENERS ---
+    runAnalysisBtn.addEventListener('click', runOllamaAnalysis);
+    
+    resetViewBtn.addEventListener('click', () => {
+        targetDexRotation = 0;
+        targetNftRotation = 0;
+        log('View reset to initial position.', 'var(--accent-cyan)', '↺');
+    });
+    
+    autoRotateBtn.addEventListener('click', () => {
+        autoRotate = !autoRotate;
+        autoRotateBtn.textContent = `Auto Rotate: ${autoRotate ? 'ON' : 'OFF'}`;
+        log(`Auto rotation ${autoRotate ? 'enabled' : 'disabled'}.`, 
+            autoRotate ? 'var(--accent-green)' : 'var(--accent-red)', 
+            autoRotate ? '▶' : '⏸');
+    });
+    
+    clearLogBtn.addEventListener('click', () => {
+        logContent.innerHTML = '';
+        log('Log cleared.', 'var(--accent-cyan)', '🗑');
+    });
+    
+    exportLogBtn.addEventListener('click', () => {
+        const logText = logContent.innerText;
+        const blob = new Blob([logText], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `dex-dashboard-log-${new Date().toISOString().slice(0, 10)}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        log('Log exported.', 'var(--accent-green)', '📥');
+    });
+
+    // --- INITIALIZE ---
+    log('Dashboard initialized successfully.', 'var(--accent-green)', '✓');
+    log('Use mouse drag to rotate carousels.', 'var(--accent-cyan)', 'ℹ');
+    fetchOllamaModels();
+    
+    // Update wallet counts
+    dexCount.textContent = walletData.dex.length;
+    nftCount.textContent = walletData.nft.length;
+</script>
+
+</body>
+</html>

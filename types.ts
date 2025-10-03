@@ -17,4 +17,18 @@ export interface ReviewItem {
     category: ReviewCategory;
     line: number | null;
     comment: string;
+    suggestion?: string | null;
 }
+
+export enum ReviewItemStatus {
+    PENDING = 'PENDING',
+    ACCEPTED = 'ACCEPTED',
+    REJECTED = 'REJECTED',
+}
+
+export interface ManagedReviewItem extends ReviewItem {
+    id: string;
+    status: ReviewItemStatus;
+    userComments: string[];
+}
+
