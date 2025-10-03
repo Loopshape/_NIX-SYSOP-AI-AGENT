@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ~/.bin/ai — Multi-code block syntax highlighting + English/German/Chinese handling
+# ~/.bin/ai — Multi-code block syntax highlighting + auto language detection + HTML export
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -7,6 +7,7 @@ IFS=$'\n\t'
 AI_HOME="$HOME/.local_ai"
 DB="$AI_HOME/core.db"
 PYTHON_BIN="python3"
+HTML_EXPORT="$AI_HOME/last_output.html"
 
 mkdir -p "$AI_HOME"
 
@@ -34,31 +35,57 @@ init_db() {
     );"
 }
 
-# --- Python snippet for multi-block syntax highlighting ---
+# --- Python snippet for multi-block syntax highlighting + HTML export ---
 highlight_output() {
     local text="$1"
     "$PYTHON_BIN" - <<EOF
-import sys
+import sys, re
 from rich.console import Console
 from rich.syntax import Syntax
-import re
+from rich.markup import escape
+from pygments.lexers import guess_lexer
+from rich import print as rprint
+from rich.highlighter import RegexHighlighter
+from rich.text import Text
+from rich.console import Group
+from rich.panel import Panel
+from rich.layout import Layout
+from rich.syntax import Syntax
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.jupyter import JupyterMixin
+from rich.style import Style
+from rich.syntax import Syntax
 
-console = Console()
-blocks = re.split(r'```([a-zA-Z0-9]*)\n(.*?)```', """$text""", flags=re.DOTALL)
+console = Console(record=True)
+
+blocks = re.split(r'```(.*?)```', """$text""", flags=re.DOTALL)
+grouped = []
 
 i = 0
 while i < len(blocks):
-    if i + 2 < len(blocks):
-        lang = blocks[i+1] if blocks[i+1] else "text"
-        code = blocks[i+2]
+    if i + 1 < len(blocks):
+        code = blocks[i+1]
+        try:
+            lexer = guess_lexer(code)
+            lang = lexer.name.lower()
+        except Exception:
+            lang = "text"
         syntax = Syntax(code, lang, theme="monokai", line_numbers=True)
-        console.print(syntax)
-        i += 3
+        grouped.append(syntax)
+        i += 2
     else:
         if blocks[i].strip():
-            console.print(blocks[i])
+            grouped.append(blocks[i])
         i += 1
+
+for g in grouped:
+    console.print(g)
+
+# --- Export HTML ---
+console.save_html("$HTML_EXPORT", inline_styles=True)
 EOF
+echo "[*] Exported last AI output to $HTML_EXPORT"
 }
 
 # --- Translate Chinese input to English ---
@@ -92,45 +119,39 @@ PY
 detect_german() {
     local prompt="$1"
     if [[ "$prompt" =~ [äöüßÄÖÜ] ]]; then
-        return 0  # German detected
+        return 0
     else
         return 1
     fi
 }
 
-# --- AI logic (example placeholders) ---
+# --- AI logic (placeholder example) ---
 run_ai() {
     local prompt="$1"
     local response
 
-    # Auto-detect German
     if detect_german "$prompt"; then
         german_mode=1
     else
         german_mode=0
     fi
 
-    # Translate Chinese input to English
     prompt=$(translate_chinese "$prompt")
 
-    # --- Example AI responses ---
     if [[ "$prompt" =~ "capital of Germany" ]]; then
         response="The capital of Germany is Berlin."
     elif [[ "$prompt" =~ "def " ]]; then
-        response="```python\ndef greet(name):\n    return f'Hello, {name}!'\n```"
+        response="```def greet(name):\n    return f'Hello, {name}!'\n```\n```print(greet('World'))```"
     else
         response="$prompt"
     fi
 
-    # Translate output to German if flagged
     if [[ "$german_mode" -eq 1 ]]; then
         response=$(translate_to_german "$response")
     fi
 
-    # Syntax highlight multi-block
     highlight_output "$response"
 
-    # Log to cache
     local hash
     hash=$(echo -n "$prompt" | sha256sum | awk '{print $1}')
     sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES ('$hash', '$response');"
