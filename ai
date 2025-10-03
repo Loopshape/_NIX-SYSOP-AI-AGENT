@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ~/.bin/ai - Fixed robust AI CLI for Termux/Proot
+# ~/.bin/ai - Enhanced AI CLI with syntax highlighting & language detection
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -17,14 +17,14 @@ log(){ echo "[$(date '+%H:%M:%S')] $*"; }
 log "🔑 Environment loaded from ~/.env"
 
 # --- Mandatory dependencies ---
-for pkg in python3-full curl wget sqlite3; do
+for pkg in python3-full curl wget sqlite3 pygmentize; do
     if ! command -v $pkg &>/dev/null; then
         log "Installing missing $pkg..."
         apt install -y $pkg || brew install $pkg || npm install -g $pkg || pip install $pkg
     fi
 done
 
-# --- Initialize database if missing ---
+# --- Initialize database ---
 if [ ! -f "$DB" ]; then
     log "Initializing AI core database..."
     sqlite3 "$DB" "
@@ -51,34 +51,56 @@ if [ ! -f "$DB" ]; then
     "
 fi
 
-# --- Function to query AI backend ---
+# --- Function to highlight code ---
+highlight_code() {
+    local text="$1"
+
+    # Highlight fenced code blocks
+    text=$(echo "$text" | awk '
+    BEGIN { inblock=0; code="" }
+    /^```/ {
+        if (inblock==0) { inblock=1; lang=substr($0,4); next }
+        else { inblock=0
+            cmd="echo \"" code "\" | pygmentize -l " (lang?lang:"guess") " -f terminal256"
+            system(cmd)
+            code=""
+            next
+        }
+    }
+    { if (inblock) code = code $0 "\n"; else print $0 }
+    ')
+
+    # Highlight inline code marked by `backticks`
+    echo "$text" | sed -E 's/`([^`]+)`/$(echo "\1" | pygmentize -l guess -f terminal256)/g'
+}
+
+# --- Query AI backend ---
 ai_query() {
     local prompt="$1"
-    # Curl request to local AI server
     raw_response=$(curl -s -X POST "http://localhost:8080/ask" \
         -H "Content-Type: application/json" \
         -d "{\"prompt\":\"$prompt\"}")
 
-    # Parse JSON safely
     answer=$(echo "$raw_response" | python3 -c "
 import sys, json
 try:
     r = json.load(sys.stdin)
     ans = r.get('answer','')
-    # Auto-translate Chinese to English
+    # Translate Chinese to English if detected
     if any('\u4e00' <= c <= '\u9fff' for c in ans):
         import subprocess
         ans = subprocess.run(['trans', '-b', 'en'], input=ans, text=True, capture_output=True).stdout.strip()
     print(ans)
 except Exception:
-    print('[!] No valid JSON response. Check if AI server is running.')
+    print('[!] No valid JSON response. Is AI server running?')
 ")
 
-    # Cache result
+    # Cache the answer
     hash=$(echo -n "$prompt" | md5sum | cut -d' ' -f1)
     sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$hash', '$(echo "$answer" | sed "s/'/''/g")');"
 
-    echo "$answer"
+    # Highlight code in response
+    highlight_code "$answer"
 }
 
 # --- Main CLI ---
@@ -89,11 +111,11 @@ fi
 
 PROMPT="$*"
 
-# Check cache first
+# Check cache
 hash=$(echo -n "$PROMPT" | md5sum | cut -d' ' -f1)
 cached=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$hash';")
 if [ -n "$cached" ]; then
-    echo "$cached"
+    highlight_code "$cached"
     exit 0
 fi
 
