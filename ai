@@ -1,99 +1,94 @@
 #!/usr/bin/env bash
-# ai_launch.sh - Bootstrap + Self-Healing + Launch AI CLI with logging
+# ~/.bin/ai — CLI with SQLite self-check, syntax highlight, and auto-translate Chinese
 
 set -euo pipefail
+IFS=$'\n\t'
+
 AI_HOME="$HOME/.local_ai"
-BIN_DIR="$HOME/.bin"
-AI_CLI="$BIN_DIR/ai"
-REPO_DIR="$HOME/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto"
-LOG_DIR="$AI_HOME/logs"
-LOG_FILE="$LOG_DIR/ai_boot.log"
+DB="$AI_HOME/core.db"
+PYTHON_BIN="python3"
 
-mkdir -p "$LOG_DIR"
+mkdir -p "$AI_HOME"
 
-log() {
-    local timestamp
-    timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
-    echo -e "[$timestamp] $*" | tee -a "$LOG_FILE"
+# --- Ensure SQLite core DB exists ---
+init_db() {
+    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS mindflow(
+        id INTEGER PRIMARY KEY,
+        session_id TEXT,
+        loop_id INTEGER,
+        model_name TEXT,
+        output TEXT,
+        rank INTEGER,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    );"
+    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS task_logs(
+        id INTEGER PRIMARY KEY,
+        tool_used TEXT,
+        args TEXT,
+        output_summary TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    );"
+    sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(
+        prompt_hash TEXT PRIMARY KEY,
+        final_answer TEXT
+    );"
 }
 
-# ---- Dependencies ----
-install_with_apt() {
-    sudo apt-get update -y
-    sudo apt-get install -y python3-full sqlite3 curl wget git build-essential \
-        bash nodejs npm
+# --- Syntax Highlighting + Auto Translate via Python rich + googletrans ---
+highlight_output() {
+    local text="$1"
+    local lang="$2"
+
+    "$PYTHON_BIN" - <<EOF
+import sys
+from rich.console import Console
+from rich.syntax import Syntax
+from googletrans import Translator
+
+console = Console()
+translator = Translator()
+output = """$text"""
+
+# Detect and translate Chinese if present
+if any('\u4e00' <= c <= '\u9fff' for c in output):
+    output = translator.translate(output, dest='en').text
+
+syntax = Syntax(output, "$lang", theme="monokai", line_numbers=True)
+console.print(syntax)
+EOF
 }
 
-install_with_brew() {
-    command -v brew >/dev/null 2>&1 && brew install python sqlite curl wget git node
-}
+# --- Run AI prompt ---
+run_ai() {
+    local prompt="$1"
+    local response lang
 
-install_with_pip() {
-    pip install --upgrade pip
-    pip install requests rich
-}
-
-bootstrap_deps() {
-    log "Checking mandatory dependencies..."
-    command -v python3 >/dev/null 2>&1 || install_with_apt
-    command -v sqlite3 >/dev/null 2>&1 || install_with_apt
-    command -v curl >/dev/null 2>&1 || install_with_apt
-    command -v wget >/dev/null 2>&1 || install_with_apt
-    command -v node >/dev/null 2>&1 || install_with_apt
-}
-
-# ---- Self-Healing CLI ----
-prepare_ai_cli() {
-    mkdir -p "$AI_HOME" "$BIN_DIR"
-    if [ ! -f "$AI_CLI" ]; then
-        log "Copying AI CLI from repo..."
-        cp "$REPO_DIR/ai" "$AI_CLI"
-        chmod +x "$AI_CLI"
-        log "✅ AI CLI installed"
+    # Example AI logic (replace with real AI call)
+    if [[ "$prompt" =~ "capital of Germany" ]]; then
+        response="The capital of Germany is Berlin."
+        lang="text"
+    elif [[ "$prompt" =~ "def " ]]; then
+        response="def greet(name):\n    return f'Hello, {name}!'"
+        lang="python"
     else
-        if [ "$REPO_DIR/ai" -nt "$AI_CLI" ]; then
-            log "Updating AI CLI from repo..."
-            cp "$REPO_DIR/ai" "$AI_CLI"
-            chmod +x "$AI_CLI"
-            log "✅ AI CLI updated"
-        fi
+        # Placeholder: echo the prompt back
+        response="$prompt"
+        lang="text"
     fi
+
+    highlight_output "$response" "$lang"
+
+    # Log to cache
+    local hash
+    hash=$(echo -n "$prompt" | sha256sum | awk '{print $1}')
+    sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES ('$hash', '$response');"
 }
 
-# ---- Self-Healing Modules ----
-update_modules() {
-    mkdir -p "$AI_HOME/modules"
-    for mod in blockchain nostr lightning termux proot url-parser snippet-assembler; do
-        repo_mod="$REPO_DIR/modules/$mod.sh"
-        local_mod="$AI_HOME/modules/$mod.sh"
-        if [ ! -f "$local_mod" ] || [ "$repo_mod" -nt "$local_mod" ]; then
-            log "Updating module $mod..."
-            cp "$repo_mod" "$local_mod"
-            chmod +x "$local_mod"
-            log "✅ Module $mod updated"
-        fi
-    done
-}
+# --- Main ---
+if [ $# -lt 1 ]; then
+    echo "Usage: ai 'your prompt'"
+    exit 1
+fi
 
-# ---- Launch CLI ----
-launch_ai() {
-    if [ $# -eq 0 ]; then
-        log "Usage: ai_launch.sh 'your prompt'"
-        exit 1
-    fi
-    log "Launching AI CLI with prompt: $*"
-    "$AI_CLI" "$@"
-    log "AI CLI finished execution"
-}
-
-main() {
-    log "🔍 Bootstrapping AI environment..."
-    bootstrap_deps
-    install_with_brew || true
-    install_with_pip || true
-    prepare_ai_cli
-    update_modules
-    launch_ai "$@"
-}
-
-main "$@"
+init_db
+run_ai "$*"
