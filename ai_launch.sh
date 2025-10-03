@@ -1,40 +1,57 @@
 #!/usr/bin/env bash
-# ~/.bin/ai_add_module - add shell module to AI DB
+# ~/bin/ai_launch.sh
+# Launch Ollama server + ensure environment + single CLI integration
+
 set -euo pipefail
 IFS=$'\n\t'
 
 AI_HOME="$HOME/.local_ai"
-DB="$AI_HOME/core.db"
+AI_BIN="$HOME/.bin/ai"
+LOGS="$HOME/logs"
 
-if [ $# -lt 1 ]; then
-    echo "Usage: ai_add_module <module_name> [module_script_path]"
-    exit 1
-fi
+mkdir -p "$LOGS"
 
-MODULE_NAME="$1"
-SCRIPT_PATH="${2:-}"
+# -----------------------------
+# Load environment
+# -----------------------------
+[ -f "$AI_HOME/.env.local" ] && source "$AI_HOME/.env.local"
 
-if [ -n "$SCRIPT_PATH" ] && [ ! -f "$SCRIPT_PATH" ]; then
-    echo "[ERROR] File not found: $SCRIPT_PATH"
-    exit 1
-fi
-
-# Read script as blob
-if [ -n "$SCRIPT_PATH" ]; then
-    SCRIPT_CONTENT=$(<"$SCRIPT_PATH")
+# -----------------------------
+# Start Ollama server (single instance)
+# -----------------------------
+if ! pgrep -x ollama >/dev/null 2>&1; then
+    echo "[INFO] Starting Ollama server..."
+    nohup ollama serve >"$LOGS/ollama_server.log" 2>&1 &
 else
-    # empty placeholder
-    SCRIPT_CONTENT=""
+    echo "[INFO] Ollama server already running."
 fi
 
-# Insert or replace into DB
-sqlite3 "$DB" <<SQL
-INSERT INTO modules(name, script, enabled, timestamp)
-VALUES ($(printf '%q' "$MODULE_NAME"), $(printf '%q' "$SCRIPT_CONTENT"), 1, CURRENT_TIMESTAMP)
-ON CONFLICT(name) DO UPDATE SET
-    script=excluded.script,
-    enabled=excluded.enabled,
-    timestamp=CURRENT_TIMESTAMP;
-SQL
+# -----------------------------
+# Ensure dependencies installed (only mandatory)
+# -----------------------------
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "[INFO] Installing python3-full..."
+    sudo apt update && sudo apt install -y python3-full
+fi
 
-echo "[INFO] Module '$MODULE_NAME' inserted/updated successfully."
+for dep in sqlite3 git curl wget nodejs build-essential; do
+    if ! command -v "$dep" >/dev/null 2>&1; then
+        echo "[INFO] Installing $dep..."
+        sudo apt install -y "$dep"
+    fi
+done
+
+# -----------------------------
+# Self-healing modules & DB
+# -----------------------------
+echo "[INFO] Ensuring AI DB & modules..."
+python3 "$AI_BIN" "__self_heal__" >/dev/null 2>&1 || true
+
+# -----------------------------
+# Launch CLI
+# -----------------------------
+if [[ $# -gt 0 ]]; then
+    "$AI_BIN" "$*"
+else
+    echo "Usage: $0 '<your query>'"
+fi
