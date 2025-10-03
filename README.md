@@ -1,3 +1,35 @@
+---
+
+COMMANDLINE
+# Hilfe
+ai help
+
+# Multi-Model reasoning
+ai "fix index.html"
+
+# Utilities
+ai hash <file_or_string>
+ai download <url> [filename]
+ai scan <pattern> [dir]
+ai lint <file>
+
+# Wallet & BTC
+ai wallet
+ai btc buy 1000
+ai btc sell 0.01
+
+# WebKit Build Simulation
+ai webkit-build
+
+# Self-Healing / Updating
+ai import-snippet <url_or_file>
+ai update-repo <project_hash>
+
+# Start interactive Web UI
+ai serve
+
++++
+
 ### 1. **Understand Satoshi Nakamoto**
    - Research his life before Bitcoin, including early career
 milestones and awards received.
