@@ -148,7 +148,7 @@ query_ai(){
     # Run Ollama and capture stderr and stdout separately for better error analysis
     # Use 'bash -c' to ensure the output is exactly what we expect from ollama
     result=$(
-        ollama run "$OLLAMA_MODEL" --json "$prompt" 2>&1 || true
+        ollama run "$OLLAMA_MODEL" "$prompt" 2>&1 || true
     )
     
     # Check if the result contains an Ollama error message
