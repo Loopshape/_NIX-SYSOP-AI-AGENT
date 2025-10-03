@@ -1,37 +1,36 @@
 #!/usr/bin/env bash
-# Self-Updating AI CLI (English/German only, Monokai-dark ANSI colors)
+# AI CLI v3.1 with Monokai-dark syntax highlighting for code snippets
 set -euo pipefail
 IFS=$'\n\t'
 
-# --- ANSI Colors for Monokai-dark ---
-COLOR_RESET="\033[0m"
-COLOR_PINK="\033[95m"
-COLOR_GREEN="\033[92m"
-COLOR_BLUE="\033[94m"
-COLOR_ORANGE="\033[38;5;214m"
-COLOR_GRAY="\033[37m"
+# --- ANSI Colors (Monokai-dark) ---
+RESET="\033[0m"
+BLACK="\033[30m"
+RED="\033[31m"
+GREEN="\033[92m"
+ORANGE="\033[38;5;214m"
+BLUE="\033[34m"
+PINK="\033[95m"
+CYAN="\033[36m"
+GRAY="\033[37m"
+YELLOW="\033[33m"
 
-log() { echo -e "${COLOR_BLUE}[$(date '+%H:%M:%S')]${COLOR_RESET} $*"; }
+log() { echo -e "${BLUE}[$(date '+%H:%M:%S')]${RESET} $*"; }
 
-# --- Directories & Variables ---
+# --- Directories ---
 AI_HOME="${HOME}/.local_ai"
 MODULES_DIR="$AI_HOME/modules"
 DB="$AI_HOME/core.db"
-SANDBOX="$AI_HOME/sandbox"
-LOGS="$HOME/logs"
-REPO="https://github.com/YourUser/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto"
+mkdir -p "$AI_HOME" "$MODULES_DIR"
 
-mkdir -p "$AI_HOME" "$MODULES_DIR" "$SANDBOX" "$LOGS"
-
-# --- Self-Heal: update AI CLI ---
+# --- Self-Heal / Update ---
 SELF="$AI_HOME/ai"
-log "🔄 Checking for updates..."
-curl -sL "$REPO/main/ai.sh" -o "$SELF.tmp" && chmod +x "$SELF.tmp" && mv "$SELF.tmp" "$SELF"
+curl -sL "https://raw.githubusercontent.com/YourUser/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto/main/ai.sh" -o "$SELF.tmp" && chmod +x "$SELF.tmp" && mv "$SELF.tmp" "$SELF"
 alias ai="$SELF"
 
-# --- Pull Modules ---
+# --- Modules ---
 for mod in blockchain nostr lightning termux url-parser snippet-assembler; do
-    curl -sL "$REPO/modules/$mod.sh" -o "$MODULES_DIR/$mod.sh"
+    curl -sL "https://raw.githubusercontent.com/YourUser/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto/main/modules/$mod.sh" -o "$MODULES_DIR/$mod.sh"
     chmod +x "$MODULES_DIR/$mod.sh"
 done
 
@@ -51,8 +50,7 @@ for cmd in python3 sqlite3 curl wget git unzip node npm ollama; do
     fi
 done
 
-# --- Initialize DB ---
-log "✅ Initializing AI database (if missing)..."
+# --- Database Setup ---
 sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS mindflow(id INTEGER PRIMARY KEY, session_id TEXT, model_name TEXT, output TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
 sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(prompt_hash TEXT PRIMARY KEY, final_answer TEXT);"
 
@@ -66,22 +64,35 @@ fi
 HASH=$(echo -n "$PROMPT" | sha256sum | awk '{print $1}')
 CACHED=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$HASH';")
 if [ -n "$CACHED" ]; then
-    echo -e "${COLOR_GREEN}$CACHED${COLOR_RESET}"
+    echo -e "${GREEN}$CACHED${RESET}"
     exit 0
 fi
 
-# --- Generate via Ollama ---
+# --- AI Generation ---
 MODEL="default-model"
 RAW_OUTPUT=$(ollama generate "$MODEL" "$PROMPT" 2>/dev/null)
 
-# --- Language Filter (English/German only) ---
+# --- Language Filter ---
 FILTERED_OUTPUT=$(echo "$RAW_OUTPUT" | sed 's/[^A-Za-z0-9äöüßÄÖÜ,.!?;:()"\x27 \t\n-]//g')
 
-# --- Store Results ---
+# --- Store in DB ---
 SESSION=$(uuidgen)
 sqlite3 "$DB" "INSERT INTO mindflow(session_id, model_name, output) VALUES('$SESSION','$MODEL','$(echo "$FILTERED_OUTPUT" | sed "s/'/''/g")');"
 sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$HASH','$(echo "$FILTERED_OUTPUT" | sed "s/'/''/g")');"
 
+# --- Monokai-dark Syntax Highlighting Function ---
+highlight_code() {
+    local code="$1"
+    code=$(echo "$code" | sed -E \
+        -e "s/([0-9]+)/${ORANGE}\1${RESET}/g" \
+        -e "s/\"([^\"]*)\"/${GREEN}\"\\1\"${RESET}/g" \
+        -e "s/'([^']*)'/${GREEN}'\\1'${RESET}/g" \
+        -e "s/\\b(if|else|for|while|return|function|import|from|class|def|in|break|continue)\\b/${PINK}\1${RESET}/g" \
+        -e "s/#(.*)/${GRAY}#\1${RESET}/g")
+    echo -e "$code"
+}
+
 # --- Output ---
-echo -e "${COLOR_ORANGE}$FILTERED_OUTPUT${COLOR_RESET}"
+echo -e "${CYAN}--- AI Output ---${RESET}"
+highlight_code "$FILTERED_OUTPUT"
 log "✅ AI CLI finished. English/German only enforced."
