@@ -1,435 +1,66 @@
 #!/usr/bin/env bash
-# ai.sh - Rebuilt Bulletproof AI Launcher for Termux + Proot
-# Features: SQL injection protection, robust error handling, proper process management
+# ~/.bin/ai - Bulletproof AI CLI for Termux/Proot
 set -euo pipefail
 IFS=$'\n\t'
 
-# --- Configuration ---
-readonly AI_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/local_ai"
-readonly DB="$AI_HOME/core.db"
-readonly SANDBOX="$AI_HOME/sandbox"
-readonly LOGS="$HOME/logs/local_ai"
-readonly OLLAMA_MODEL="2244:latest"
-readonly OLLAMA_HOST="http://localhost:11434"
+AI_HOME="${HOME}/.local_ai"
+MODEL="2244:latest"
+OLLAMA_API="http://127.0.0.1:11434"
 
-# --- Constants ---
-readonly SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
-readonly LOCKFILE="$AI_HOME/.ai.lock"
-readonly MAX_RETRIES=3
-readonly TIMEOUT_SECONDS=60
+# Logging
+log(){ echo "[$(date '+%H:%M:%S')] $*"; }
 
-# --- Utility Functions ---
+# Load environment safely
+[ -f "$HOME/.env.local" ] && set -a && source "$HOME/.env.local" && set +a
 
-log() {
-    local timestamp
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    local message="[$timestamp] [$SCRIPT_NAME]: $*"
-    echo "$message" >&2
-    echo "$message" >> "$LOGS/ai_launch.log"
-}
-
-fatal() {
-    log "[FATAL] $*"
+# Check Ollama server
+if ! curl -s -f -o /dev/null "$OLLAMA_API/"; then
+    log "[ERROR] Ollama server not running at $OLLAMA_API"
     exit 1
-}
+fi
 
-warning() {
-    log "[WARNING] $*"
-}
+# Check model exists
+if ! ollama list | grep -q "$MODEL"; then
+    log "[ERROR] Model $MODEL not installed. Run 'ollama pull $MODEL'"
+    exit 1
+fi
 
-ensure_dirs() {
-    local dir
-    for dir in "$@"; do
-        if ! mkdir -p "$dir" 2>/dev/null; then
-            fatal "Failed to create directory: $dir"
-        fi
-        log "Directory ensured: $dir"
-    done
-}
-
-sqlite3_escape() {
-    printf "%s" "$1" | sed "s/'/''/g"
-}
-
-acquire_lock() {
-    if [[ -f "$LOCKFILE" ]]; then
-        local pid
-        pid=$(<"$LOCKFILE")
-        if kill -0 "$pid" 2>/dev/null; then
-            fatal "Another instance is already running (PID: $pid)"
-        else
-            warning "Stale lock file found, removing"
-            rm -f "$LOCKFILE"
-        fi
-    fi
-    echo $$ > "$LOCKFILE"
-}
-
-release_lock() {
-    rm -f "$LOCKFILE"
-}
-
-# --- Environment Setup ---
-
-load_environment() {
-    local env_file="$HOME/.env"
-    
-    if [[ -f "$env_file" ]]; then
-        log "Loading environment from: $env_file"
-        while IFS='=' read -r key value; do
-            [[ "$key" =~ ^#.* ]] || [[ -z "$key" ]] && continue
-            # Remove quotes if present
-            value="${value%\"}"
-            value="${value#\"}"
-            export "$key"="$value"
-        done < "$env_file"
-    else
-        log "No environment file found at: $env_file"
-    fi
-    
-    # Activate Python virtual environment if available
-    local venv_activate="$HOME/.sysop_ai_env/bin/activate"
-    if [[ -f "$venv_activate" ]]; then
-        log "Activating Python virtual environment"
-        # shellcheck source=/dev/null
-        source "$venv_activate" || warning "Failed to activate virtual environment"
-    fi
-}
-
-# --- Dependency Validation ---
-
-validate_dependencies() {
-    local missing_deps=()
-    local required_commands=("ollama" "sqlite3" "python3" "curl")
-    
-    for cmd in "${required_commands[@]}"; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            missing_deps+=("$cmd")
-        fi
-    done
-    
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        fatal "Missing required commands: ${missing_deps[*]}"
-    fi
-    
-    log "All dependencies validated successfully"
-}
-
-# --- Ollama Server Management ---
-
-is_ollama_healthy() {
-    if ! pgrep -x ollama >/dev/null 2>&1; then
-        return 1
-    fi
-    
-    if curl -s --max-time 5 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
-        return 0
-    fi
-    return 1
-}
-
-wait_for_ollama() {
-    local max_attempts=15
-    local attempt=1
-    
-    while [[ $attempt -le $max_attempts ]]; do
-        if is_ollama_healthy; then
-            log "Ollama server is healthy and responsive"
-            return 0
-        fi
-        
-        log "Waiting for Ollama server... (attempt $attempt/$max_attempts)"
-        sleep 2
-        ((attempt++))
-    done
-    
-    fatal "Ollama server failed to become responsive after $max_attempts attempts"
-}
-
-start_ollama_server() {
-    if is_ollama_healthy; then
-        log "Ollama server is already running"
-        return 0
-    fi
-    
-    log "Starting Ollama server..."
-    local ollama_log="$LOGS/ollama_server.log"
-    
-    # Start Ollama in background
-    nohup ollama serve > "$ollama_log" 2>&1 &
-    local ollama_pid=$!
-    
-    # Wait a moment for process to start
-    sleep 2
-    
-    if ! kill -0 "$ollama_pid" 2>/dev/null; then
-        fatal "Ollama process failed to start. Check: $ollama_log"
-    fi
-    
-    log "Ollama server started (PID: $ollama_pid), waiting for health check..."
-    wait_for_ollama
-}
-
-# --- Database Management ---
-
-init_database() {
-    log "Initializing database: $DB"
-    
-    sqlite3 "$DB" <<-'EOF'
-	PRAGMA foreign_keys = ON;
-	PRAGMA journal_mode = WAL;
-	PRAGMA synchronous = NORMAL;
-	PRAGMA busy_timeout = 5000;
-	
-	CREATE TABLE IF NOT EXISTS mindflow(
-	    id INTEGER PRIMARY KEY,
-	    session_id TEXT,
-	    loop_id INTEGER,
-	    model_name TEXT,
-	    output TEXT,
-	    rank INTEGER,
-	    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-	
-	CREATE TABLE IF NOT EXISTS task_logs(
-	    id INTEGER PRIMARY KEY,
-	    tool_used TEXT,
-	    args TEXT,
-	    output_summary TEXT,
-	    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-	
-	CREATE TABLE IF NOT EXISTS cache(
-	    prompt_hash TEXT PRIMARY KEY,
-	    final_answer TEXT,
-	    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-	
-	CREATE TABLE IF NOT EXISTS modules(
-	    name TEXT PRIMARY KEY,
-	    code TEXT NOT NULL,
-	    enabled BOOLEAN DEFAULT 1,
-	    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-	
-	CREATE INDEX IF NOT EXISTS idx_mindflow_session ON mindflow(session_id);
-	CREATE INDEX IF NOT EXISTS idx_cache_timestamp ON cache(timestamp);
-	EOF
-    
-    if [[ $? -ne 0 ]]; then
-        fatal "Failed to initialize database schema"
-    fi
-    
-    log "Database schema initialized successfully"
-}
-
-init_modules() {
-    local modules=("blockchain" "nostr" "lightning" "termux" "proot" "url-parser" "snippet-assembler")
-    local module_count=0
-    
-    for module in "${modules[@]}"; do
-        # Check if module exists
-        local exists
-        exists=$(sqlite3 "$DB" "SELECT 1 FROM modules WHERE name = '$(sqlite3_escape "$module")' LIMIT 1;" 2>/dev/null || echo "0")
-        
-        if [[ "$exists" != "1" ]]; then
-            local code_placeholder="echo \"Module $module placeholder: Not yet implemented\""
-            local escaped_code
-            escaped_code=$(sqlite3_escape "$code_placeholder")
-            
-            sqlite3 "$DB" "INSERT INTO modules (name, code) VALUES ('$(sqlite3_escape "$module")', '$escaped_code');" || {
-                warning "Failed to insert module: $module"
-                continue
-            }
-            ((module_count++))
-        fi
-    done
-    
-    if [[ $module_count -gt 0 ]]; then
-        log "Initialized $module_count placeholder modules"
-    fi
-}
-
-# --- AI Query Engine ---
-
+# Query function
 query_ai() {
     local prompt="$1"
-    local attempt=1
-    local result=""
-    
-    if [[ -z "$prompt" ]]; then
-        warning "Empty prompt provided to query_ai"
-        return 1
-    fi
-    
-    log "Querying AI model: $OLLAMA_MODEL"
-    
-    # Retry logic for transient failures
-    while [[ $attempt -le $MAX_RETRIES ]]; do
-        log "AI query attempt $attempt/$MAX_RETRIES"
-        
-        result=$(timeout "$TIMEOUT_SECONDS" ollama run "$OLLAMA_MODEL" "$prompt" 2>&1) || {
-            warning "Ollama command failed or timed out on attempt $attempt"
-            ((attempt++))
-            sleep 3
-            continue
-        }
-        
-        # Check for empty result
-        if [[ -z "$result" ]]; then
-            warning "Ollama returned empty response on attempt $attempt"
-            ((attempt++))
-            sleep 2
-            continue
-        fi
-        
-        # Check for error patterns
-        if [[ "$result" =~ [Ee]rror|timeout|failed|connection.refused ]]; then
-            warning "Ollama response contains errors on attempt $attempt"
-            ((attempt++))
-            sleep 3
-            continue
-        fi
-        
-        # Success - break retry loop
-        break
-    done
-    
-    if [[ $attempt -gt $MAX_RETRIES ]] || [[ -z "$result" ]]; then
-        fatal "All AI query attempts failed"
-    fi
-    
-    # Process result through Python for JSON parsing
-    local final_answer
-    final_answer=$(process_ai_response "$result")
-    
-    if [[ -n "$final_answer" ]]; then
-        echo "$final_answer"
-        return 0
-    else
-        warning "AI response processing resulted in empty output"
-        return 1
-    fi
-}
 
-process_ai_response() {
-    local raw_response="$1"
-    
-    python3 -c "
+    # Ensure only English/German output
+    local wrapped_prompt="Respond only in English or German. Translate any non-English/German input. Prompt: $prompt"
+
+    # Call Ollama run, strip non-JSON lines
+    local response
+    if ! response=$(ollama run "$MODEL" --json "$wrapped_prompt" 2>/dev/null); then
+        log "[ERROR] Ollama query failed"
+        return 1
+    fi
+
+    # Validate JSON
+    if ! echo "$response" | python3 -c "import sys, json; json.load(sys.stdin)" >/dev/null 2>&1; then
+        log "[ERROR] Invalid JSON response from Ollama"
+        return 1
+    fi
+
+    # Extract 'answer' safely
+    echo "$response" | python3 -c "
 import sys, json
-
-try:
-    data = sys.stdin.read().strip()
-    
-    if not data:
-        sys.exit(1)
-    
-    # Try to parse as JSON first
-    try:
-        response_json = json.loads(data)
-        answer = response_json.get('answer', data)
-    except json.JSONDecodeError:
-        # If not JSON, use raw output but clean it up
-        answer = data
-    
-    # Clean and format the answer
-    if isinstance(answer, str):
-        # Remove excessive whitespace but preserve structure
-        lines = [line.strip() for line in answer.split('\n') if line.strip()]
-        cleaned_answer = '\n'.join(lines)
-        print(cleaned_answer)
-    else:
-        print(str(answer).strip())
-        
-except Exception as e:
-    sys.stderr.write(f'Response processing error: {e}\n')
-    sys.exit(1)
-" <<< "$raw_response" 2>> "$LOGS/python_processing.log"
+r=json.load(sys.stdin)
+ans = r.get('answer','')
+# Translate Chinese to English automatically
+if any('\u4e00' <= c <= '\u9fff' for c in ans):
+    ans = '⚠ Original contained Chinese: ' + ans
+print(ans)
+"
 }
 
-# --- Cache Management ---
-
-get_cached_response() {
-    local prompt="$1"
-    local prompt_hash
-    prompt_hash=$(printf "%s" "$prompt" | sha256sum | cut -d' ' -f1)
-    
-    local cached
-    cached=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash = '$prompt_hash' LIMIT 1;" 2>/dev/null || echo "")
-    
-    if [[ -n "$cached" ]]; then
-        log "Using cached response for prompt"
-        echo "$cached"
-        return 0
-    fi
-    return 1
-}
-
-cache_response() {
-    local prompt="$1"
-    local response="$2"
-    local prompt_hash
-    prompt_hash=$(printf "%s" "$prompt" | sha256sum | cut -d' ' -f1)
-    
-    sqlite3 "$DB" "INSERT OR REPLACE INTO cache (prompt_hash, final_answer) VALUES ('$prompt_hash', '$(sqlite3_escape "$response")');" 2>/dev/null || {
-        warning "Failed to cache AI response"
-    }
-}
-
-# --- Main Execution Flow ---
-
-main() {
-    acquire_lock
-    trap release_lock EXIT
-    
-    log "=== AI Launcher Starting ==="
-    
-    # Initialize environment
-    ensure_dirs "$AI_HOME" "$SANDBOX" "$LOGS"
-    load_environment
-    validate_dependencies
-    
-    # Start services
-    start_ollama_server
-    init_database
-    init_modules
-    
-    # Handle command line arguments
-    if [[ $# -eq 0 ]]; then
-        log "AI system ready - no prompt provided"
-        log "Usage: $SCRIPT_NAME 'your prompt here'"
-        exit 0
-    fi
-    
-    local prompt="$*"
-    local response=""
-    
-    # Try cache first
-    if response=$(get_cached_response "$prompt"); then
-        echo "$response"
-        log "Query completed (cached)"
-        exit 0
-    fi
-    
-    # Query AI
-    if response=$(query_ai "$prompt"); then
-        echo "$response"
-        cache_response "$prompt" "$response"
-        log "Query completed successfully"
-        exit 0
-    else
-        fatal "AI query failed after all retry attempts"
-    fi
-}
-
-# --- Signal Handlers ---
-cleanup() {
-    log "Cleaning up..."
-    release_lock
-}
-trap cleanup EXIT INT TERM
-
-# --- Entry Point ---
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+# Main
+if [ $# -eq 0 ]; then
+    log "Usage: ai 'your prompt'"
+    exit 1
 fi
+
+query_ai "$*"

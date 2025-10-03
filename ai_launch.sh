@@ -30,6 +30,46 @@ mkdir_p "$AI_HOME/modules"
 mkdir_p "$SANDBOX"
 mkdir_p "$LOGS"
 
+query_ai(){
+    prompt="$1"
+
+    # Try cache first
+    cached=$(python3 "$AI_HOME/ai_db.py" get "$prompt" 2>/dev/null)
+    if [[ -n "$cached" ]]; then
+        echo "$cached" | python3 "$AI_HOME/highlight.py"
+        return 0
+    fi
+
+    result=$(ollama run 2244:latest --json "$prompt" 2>/dev/null || true)
+    if [[ -z "$result" ]]; then
+        log "[ERROR] Ollama query failed or server not ready."
+        return 1
+    fi
+
+    # English/German filter
+    filtered=$(echo "$result" | python3 -c "
+import sys, json
+try:
+    r=json.load(sys.stdin)
+    ans=r.get('answer','')
+    ans=''.join([c for c in ans if ord(c)<128 or (ord(c)>=0x0400 and ord(c)<=0x04FF)])
+    print(ans)
+except Exception:
+    sys.exit(1)
+")
+
+    # Detect code blocks
+    if [[ "$filtered" =~ \`\`\` ]]; then
+        code=$(echo "$filtered" | sed 's/```//g')
+        # simple language guess
+        if [[ "$code" =~ "def " ]]; then lang="python"; elif [[ "$code" =~ "echo " ]]; then lang="bash"; else lang="text"; fi
+        # store in SQL BLOB
+        echo "$code" | python3 "$AI_HOME/ai_db.py" store "$prompt" "$lang"
+        echo "$code" | python3 "$AI_HOME/highlight.py"
+    else
+        echo "$filtered"
+    fi
+}
 # --- Environment Setup (omitted for brevity, assume previous revision is used) ---
 # ... (loading environment and venv activation) ...
 
