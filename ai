@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ~/.bin/ai — CLI with SQLite, syntax highlight, auto-detect English/German, auto-translate Chinese to English, auto-detect code blocks
+# ~/.bin/ai — Multi-code block syntax highlighting + English/German/Chinese handling
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -34,30 +34,31 @@ init_db() {
     );"
 }
 
-# --- Syntax Highlight with auto-detect ---
+# --- Python snippet for multi-block syntax highlighting ---
 highlight_output() {
     local text="$1"
-    local lang="$2"
-
     "$PYTHON_BIN" - <<EOF
 import sys
 from rich.console import Console
 from rich.syntax import Syntax
+import re
 
 console = Console()
-syntax = Syntax("""$text""", "$lang", theme="monokai", line_numbers=True)
-console.print(syntax)
-EOF
-}
+blocks = re.split(r'```([a-zA-Z0-9]*)\n(.*?)```', """$text""", flags=re.DOTALL)
 
-# --- Detect language from code fences ---
-detect_code_language() {
-    local prompt="$1"
-    if [[ "$prompt" =~ \`\`\`([a-zA-Z0-9]+) ]]; then
-        echo "${BASH_REMATCH[1]}"
-    else
-        echo "text"
-    fi
+i = 0
+while i < len(blocks):
+    if i + 2 < len(blocks):
+        lang = blocks[i+1] if blocks[i+1] else "text"
+        code = blocks[i+2]
+        syntax = Syntax(code, lang, theme="monokai", line_numbers=True)
+        console.print(syntax)
+        i += 3
+    else:
+        if blocks[i].strip():
+            console.print(blocks[i])
+        i += 1
+EOF
 }
 
 # --- Translate Chinese input to English ---
@@ -93,14 +94,14 @@ detect_german() {
     if [[ "$prompt" =~ [äöüßÄÖÜ] ]]; then
         return 0  # German detected
     else
-        return 1  # Not German
+        return 1
     fi
 }
 
-# --- Run AI prompt ---
+# --- AI logic (example placeholders) ---
 run_ai() {
     local prompt="$1"
-    local response lang
+    local response
 
     # Auto-detect German
     if detect_german "$prompt"; then
@@ -112,15 +113,11 @@ run_ai() {
     # Translate Chinese input to English
     prompt=$(translate_chinese "$prompt")
 
-    # Auto-detect code language from fences
-    lang=$(detect_code_language "$prompt")
-
-    # Example AI logic (replace with your AI engine)
+    # --- Example AI responses ---
     if [[ "$prompt" =~ "capital of Germany" ]]; then
         response="The capital of Germany is Berlin."
     elif [[ "$prompt" =~ "def " ]]; then
-        response="def greet(name):\n    return f'Hello, {name}!'"
-        lang="python"
+        response="```python\ndef greet(name):\n    return f'Hello, {name}!'\n```"
     else
         response="$prompt"
     fi
@@ -130,7 +127,8 @@ run_ai() {
         response=$(translate_to_german "$response")
     fi
 
-    highlight_output "$response" "$lang"
+    # Syntax highlight multi-block
+    highlight_output "$response"
 
     # Log to cache
     local hash
