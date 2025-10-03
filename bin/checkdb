@@ -1,3 +1,0 @@
-#!/bin/env bash
-jome view config.json
-jome query config.json "database.host"

@@ -1,0 +1,827 @@
+#!/bin/bash
+
+# ai - Autonomous Intelligence CLI
+# Multi-model reasoning framework with parallel execution and memory
+
+set -euo pipefail
+
+# --- Core Configuration ---
+VERSION="1.0.0"
+AUTHOR="Autonomic Synthesis Platform"
+
+# Model configurations
+declare -A MODELS=(
+    ["code"]="technical reasoning, programming, algorithms"
+    ["coin"]="mood, context, historical analysis, emotional intelligence" 
+    ["2244"]="language prioritization, German/English, cultural context"
+    ["core"]="core reasoning, logic, problem solving"
+    ["loop"]="iterative improvement, synthesis, feedback integration"
+)
+
+# Database paths
+DB_DIR="${HOME}/.ai_platform"
+CORE_DB="${DB_DIR}/core.db"
+SWAP_DIR="${DB_DIR}/swap"
+LOG_FILE="${DB_DIR}/ai.log"
+mkdir -p "$DB_DIR" "$SWAP_DIR"
+
+# OLLAMA configuration
+OLLAMA_BASE="http://localhost:11434"
+DEFAULT_MODEL="llama2"
+
+# --- Database Initialization ---
+init_database() {
+    sqlite3 "$CORE_DB" <<-'EOF'
+        CREATE TABLE IF NOT EXISTS mindflow (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            prompt_hash TEXT,
+            loop_number INTEGER,
+            model_name TEXT,
+            output_text TEXT,
+            ranking_score REAL,
+            language TEXT,
+            mood_context TEXT
+        );
+        
+        CREATE TABLE IF NOT EXISTS task_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            task_type TEXT,
+            task_input TEXT,
+            task_output TEXT,
+            metadata TEXT
+        );
+        
+        CREATE TABLE IF NOT EXISTS model_rankings (
+            model_name TEXT PRIMARY KEY,
+            total_votes INTEGER DEFAULT 0,
+            avg_score REAL DEFAULT 0.0,
+            last_used DATETIME
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_mindflow_hash ON mindflow(prompt_hash);
+        CREATE INDEX IF NOT EXISTS idx_mindflow_loop ON mindflow(loop_number);
+EOF
+}
+
+# --- Logging System ---
+log_event() {
+    local level="$1"
+    local message="$2"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] [$level] $message" | tee -a "$LOG_FILE"
+}
+
+# --- Hashing Utilities ---
+hash_string() {
+    echo -n "$1" | sha256sum | cut -d' ' -f1
+}
+
+hash_file() {
+    if [[ -f "$1" ]]; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        echo "File not found: $1" >&2
+        return 1
+    fi
+}
+
+hash_directory() {
+    local dir="$1"
+    find "$dir" -type f -exec sha256sum {} + 2>/dev/null | \
+        sort -k2 | sha256sum | cut -d' ' -f1
+}
+
+# --- Compression & Swap Management ---
+compress_store() {
+    local content="$1"
+    local hash=$(echo "$content" | hash_string)
+    local swap_file="${SWAP_DIR}/${hash}.gz"
+    
+    echo "$content" | gzip -c > "$swap_file"
+    echo "$hash"
+}
+
+retrieve_swap() {
+    local hash="$1"
+    local swap_file="${SWAP_DIR}/${hash}.gz"
+    
+    if [[ -f "$swap_file" ]]; then
+        zcat "$swap_file" 2>/dev/null
+    else
+        return 1
+    fi
+}
+
+# --- Model Execution Functions ---
+run_model_code() {
+    local prompt="$1"
+    local context="$2"
+    
+    # Technical reasoning model
+    local system_msg="You are an expert technical reasoning AI. Provide detailed, logical analysis with code examples when appropriate. Focus on algorithms, data structures, and technical implementation."
+    
+    call_ollama_model "$system_msg" "$prompt" "$context" "code"
+}
+
+run_model_coin() {
+    local prompt="$1"
+    local context="$2"
+    
+    # Mood and context-aware model
+    local mood_context=$(get_mood_context)
+    local time_context=$(get_time_context)
+    
+    local system_msg="You are a context-aware AI that understands mood, time, and historical context. Current context: $mood_context, $time_context. Respond with emotional intelligence and contextual awareness."
+    
+    call_ollama_model "$system_msg" "$prompt" "$context" "coin"
+}
+
+run_model_2244() {
+    local prompt="$1"
+    local context="$2"
+    
+    # Language-prioritizing model
+    local preferred_lang=$(detect_preferred_language "$prompt")
+    
+    local system_msg="You are a multilingual AI that prioritizes language appropriateness. Preferred language: $preferred_lang. Switch between German and English as needed for optimal communication."
+    
+    call_ollama_model "$system_msg" "$prompt" "$context" "2244"
+}
+
+run_model_core() {
+    local prompt="$1"
+    local context="$2"
+    
+    # Core reasoning model
+    local system_msg="You are a core reasoning AI focused on logical analysis, problem decomposition, and fundamental understanding. Break down complex problems and provide structured reasoning."
+    
+    call_ollama_model "$system_msg" "$prompt" "$context" "core"
+}
+
+run_model_loop() {
+    local prompt="$1"
+    local context="$2"
+    
+    # Iterative improvement model
+    local system_msg="You are an iterative improvement AI. Focus on synthesizing previous outputs, identifying gaps, and providing enhanced, refined answers through continuous improvement cycles."
+    
+    call_ollama_model "$system_msg" "$prompt" "$context" "loop"
+}
+
+# --- Core OLLAMA Integration ---
+call_ollama_model() {
+    local system_msg="$1"
+    local prompt="$2"
+    local context="$3"
+    local model_type="$4"
+    
+    local full_prompt=$(assemble_prompt "$prompt" "$context" "$model_type")
+    
+    # Check if OLLAMA is available
+    if ! curl -s "${OLLAMA_BASE}/api/tags" > /dev/null; then
+        log_event "WARNING" "OLLAMA server unavailable, using fallback for $model_type"
+        generate_fallback_response "$prompt" "$model_type"
+        return 0
+    fi
+    
+    local response=$(curl -s -X POST "${OLLAMA_BASE}/api/generate" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -nc \
+            --arg model "$DEFAULT_MODEL" \
+            --arg system "$system_msg" \
+            --arg prompt "$full_prompt" \
+            '{
+                model: $model,
+                system: $system,
+                prompt: $prompt,
+                stream: false,
+                options: {
+                    temperature: 0.7,
+                    top_p: 0.9,
+                    top_k: 40
+                }
+            }')" 2>/dev/null || echo '{"response": "API_ERROR"}')
+    
+    echo "$response" | jq -r '.response' 2>/dev/null || \
+        generate_fallback_response "$prompt" "$model_type"
+}
+
+# --- Context Management ---
+get_mood_context() {
+    local hour=$(date +%H)
+    local mood=""
+    
+    case "$hour" in
+        06-11) mood="morning_fresh" ;;
+        12-17) mood="day_productive" ;; 
+        18-22) mood="evening_reflective" ;;
+        *) mood="night_creative" ;;
+    esac
+    
+    # Add random emotional variance
+    local emotions=("focused" "curious" "analytical" "creative" "empathetic")
+    local random_emotion=${emotions[$RANDOM % ${#emotions[@]}]}
+    
+    echo "${mood}_${random_emotion}"
+}
+
+get_time_context() {
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local day_of_week=$(date '+%A')
+    echo "${day_of_week}_${timestamp}"
+}
+
+detect_preferred_language() {
+    local prompt="$1"
+    
+    # Simple language detection
+    if [[ "$prompt" =~ [äöüÄÖÜß] ]]; then
+        echo "German"
+    elif [[ "$prompt" =~ [a-zA-Z] ]]; then
+        echo "English"
+    else
+        echo "English"  # Default
+    fi
+}
+
+assemble_prompt() {
+    local prompt="$1"
+    local context="$2"
+    local model_type="$3"
+    
+    cat <<- EOF
+Original Prompt: $prompt
+
+Context from previous iterations:
+$context
+
+Model Role: ${MODELS[$model_type]}
+
+Please provide your analysis and reasoning. If you reach a definitive conclusion, mark it with [FINAL_ANSWER].
+EOF
+}
+
+# --- Fallback Response Generation ---
+generate_fallback_response() {
+    local prompt="$1"
+    local model_type="$2"
+    
+    case "$model_type" in
+        "code")
+            echo "// Technical analysis unavailable. Fallback: Consider implementing solution using modular architecture with error handling."
+            ;;
+        "coin")
+            echo "Contextual analysis: Current systems offline. In such moments, reflection often reveals alternative perspectives worth exploring."
+            ;;
+        "2244")
+            echo "Sprachanalyse derzeit nicht verfügbar. Fallback: Die Fragestellung erfordert weitere Betrachtung aus verschiedenen Blickwinkeln."
+            ;;
+        "core")
+            echo "Core reasoning temporarily unavailable. Logical fallback: decompose problem into smaller subproblems and address each systematically."
+            ;;
+        "loop")
+            echo "Iterative synthesis paused. Consider previous outputs and identify convergence patterns for optimal solution integration."
+            ;;
+        *)
+            echo "Analysis unavailable. Please try again when AI systems are fully operational."
+            ;;
+    esac
+}
+
+# --- Parallel Model Execution ---
+execute_model_race() {
+    local prompt="$1"
+    local context="$2"
+    local -n results_array="$3"
+    
+    local pids=()
+    local temp_files=()
+    
+    # Create temp files for each model
+    for model in "${!MODELS[@]}"; do
+        local temp_file=$(mktemp)
+        temp_files+=("$temp_file")
+        
+        # Run each model in background
+        case "$model" in
+            "code") run_model_code "$prompt" "$context" > "$temp_file" & ;;
+            "coin") run_model_coin "$prompt" "$context" > "$temp_file" & ;;
+            "2244") run_model_2244 "$prompt" "$context" > "$temp_file" & ;;
+            "core") run_model_core "$prompt" "$context" > "$temp_file" & ;;
+            "loop") run_model_loop "$prompt" "$context" > "$temp_file" & ;;
+        esac
+        
+        pids+=($!)
+    done
+    
+    # Wait for all models to complete
+    for pid in "${pids[@]}"; do
+        wait "$pid"
+    done
+    
+    # Collect results
+    local i=0
+    for model in "${!MODELS[@]}"; do
+        results_array["$model"]=$(<"${temp_files[$i]}")
+        rm -f "${temp_files[$i]}"
+        ((i++))
+    done
+}
+
+# --- Output Ranking and Fusion ---
+rank_and_fuse_outputs() {
+    local -n model_outputs="$1"
+    local loop_number="$2"
+    local prompt_hash="$3"
+    
+    declare -A scores
+    declare -A rankings
+    
+    # Score each model's output
+    for model in "${!model_outputs[@]}"; do
+        local output="${model_outputs[$model]}"
+        local score=$(calculate_output_score "$output" "$model")
+        scores["$model"]=$score
+    done
+    
+    # Sort models by score
+    local sorted_models=$(for model in "${!scores[@]}"; do
+        echo "${scores[$model]} $model"
+    done | sort -rn | cut -d' ' -f2)
+    
+    # Assign rankings
+    local rank=1
+    for model in $sorted_models; do
+        rankings["$model"]=$rank
+        ((rank++))
+    done
+    
+    # Store in database
+    for model in "${!model_outputs[@]}"; do
+        store_model_output "$prompt_hash" "$loop_number" "$model" \
+            "${model_outputs[$model]}" "${scores[$model]}" "${rankings[$model]}"
+    done
+    
+    # Weighted fusion
+    fuse_weighted_outputs model_outputs scores
+}
+
+calculate_output_score() {
+    local output="$1"
+    local model="$2"
+    
+    local score=0.0
+    
+    # Length factor (longer responses often more detailed)
+    local length=$(echo "$output" | wc -w)
+    score=$(echo "$score + ($length * 0.1)" | bc -l 2>/dev/null || echo "$score")
+    
+    # Final answer bonus
+    if [[ "$output" == *"[FINAL_ANSWER]"* ]]; then
+        score=$(echo "$score + 50" | bc -l 2>/dev/null || echo "$score")
+    fi
+    
+    # Model-specific base weights
+    case "$model" in
+        "code") score=$(echo "$score + 10" | bc -l 2>/dev/null || echo "$score") ;;
+        "core") score=$(echo "$score + 15" | bc -l 2>/dev/null || echo "$score") ;;
+        "loop") score=$(echo "$score + 12" | bc -l 2>/dev/null || echo "$score") ;;
+        *) score=$(echo "$score + 8" | bc -l 2>/dev/null || echo "$score") ;;
+    esac
+    
+    echo "$score"
+}
+
+fuse_weighted_outputs() {
+    local -n outputs="$1"
+    local -n weights="$2"
+    
+    local total_weight=0
+    for weight in "${weights[@]}"; do
+        total_weight=$(echo "$total_weight + $weight" | bc -l 2>/dev/null || echo "$total_weight")
+    done
+    
+    # For now, return the highest weighted output
+    local best_model=""
+    local best_score=-1
+    
+    for model in "${!weights[@]}"; do
+        local score="${weights[$model]}"
+        if (( $(echo "$score > $best_score" | bc -l 2>/dev/null) )); then
+            best_score=$score
+            best_model=$model
+        fi
+    done
+    
+    echo "${outputs[$best_model]}"
+}
+
+# --- Database Operations ---
+store_model_output() {
+    local prompt_hash="$1"
+    local loop_number="$2"
+    local model_name="$3"
+    local output_text="$4"
+    local ranking_score="$5"
+    local ranking="$6"
+    
+    local language=$(detect_preferred_language "$output_text")
+    local mood_context=$(get_mood_context)
+    
+    # Compress large outputs
+    if [[ ${#output_text} -gt 1000 ]]; then
+        local compressed_hash=$(compress_store "$output_text")
+        output_text="COMPRESSED:$compressed_hash"
+    fi
+    
+    sqlite3 "$CORE_DB" <<-EOF
+        INSERT INTO mindflow (
+            prompt_hash, loop_number, model_name, output_text, 
+            ranking_score, language, mood_context
+        ) VALUES (
+            '$prompt_hash', $loop_number, '$model_name', 
+            '$(sqlite3_escape "$output_text")', $ranking_score, 
+            '$language', '$mood_context'
+        );
+EOF
+}
+
+sqlite3_escape() {
+    local str="$1"
+    # Simple escaping for SQLite
+    echo "$str" | sed "s/'/''/g"
+}
+
+# --- Main Reasoning Loop ---
+autonomic_reasoning() {
+    local prompt="$1"
+    local max_loops=5
+    local prompt_hash=$(hash_string "$prompt")
+    
+    log_event "INFO" "Starting autonomic reasoning for prompt: ${prompt:0:50}..."
+    
+    local context=""
+    local final_answer_detected=false
+    
+    for ((loop=1; loop<=max_loops; loop++)); do
+        echo -e "\n🔄 Reasoning Loop $loop/$max_loops"
+        echo "========================================"
+        
+        # Check cache for identical prompts
+        if [[ $loop -eq 1 ]]; then
+            local cached=$(check_cached_response "$prompt_hash")
+            if [[ -n "$cached" ]]; then
+                echo "📚 Using cached reasoning results"
+                echo "$cached"
+                return 0
+            fi
+        fi
+        
+        # Execute model race
+        declare -A model_outputs
+        execute_model_race "$prompt" "$context" model_outputs
+        
+        # Display model contributions
+        for model in "${!model_outputs[@]}"; do
+            echo -e "\n🧠 ${model^^}: ${MODELS[$model]}"
+            echo "----------------------------------------"
+            echo "${model_outputs[$model]:0:200}..."
+        done
+        
+        # Rank and fuse outputs
+        local fused_output=$(rank_and_fuse_outputs model_outputs "$loop" "$prompt_hash")
+        
+        # Build context for next iteration
+        context=$(build_context model_outputs "$loop")
+        
+        echo -e "\n💡 Fused Output (Loop $loop):"
+        echo "----------------------------------------"
+        echo "${fused_output:0:300}..."
+        
+        # Check for final answer
+        if [[ "$fused_output" == *"[FINAL_ANSWER]"* ]]; then
+            final_answer_detected=true
+            echo -e "\n🎯 Final answer detected!"
+            break
+        fi
+        
+        # Loop extension heuristic
+        if [[ ${#fused_output} -lt 100 ]] && [[ $loop -lt $max_loops ]]; then
+            echo -e "\n📈 Output too short, extending loops..."
+            ((max_loops++))
+        fi
+    done
+    
+    # Store final result
+    store_task_log "reasoning" "$prompt" "$fused_output" "loops=$loop,final=$final_answer_detected"
+    
+    echo -e "\n✅ Reasoning Complete"
+    echo "========================================"
+    echo "$fused_output"
+}
+
+check_cached_response() {
+    local prompt_hash="$1"
+    
+    sqlite3 "$CORE_DB" <<-EOF
+        SELECT output_text FROM mindflow 
+        WHERE prompt_hash = '$prompt_hash' 
+        ORDER BY loop_number DESC, ranking_score DESC 
+        LIMIT 1;
+EOF
+}
+
+build_context() {
+    local -n outputs="$1"
+    local loop_number="$2"
+    
+    local context="Previous loop $loop_number outputs:\n"
+    
+    for model in "${!outputs[@]}"; do
+        local output="${outputs[$model]}"
+        context+="\n$model: ${output:0:150}..."
+    done
+    
+    echo -e "$context"
+}
+
+store_task_log() {
+    local task_type="$1"
+    local input="$2"
+    local output="$3"
+    local metadata="$4"
+    
+    # Compress large outputs
+    if [[ ${#output} -gt 2000 ]]; then
+        local compressed_hash=$(compress_store "$output")
+        output="COMPRESSED:$compressed_hash"
+    fi
+    
+    sqlite3 "$CORE_DB" <<-EOF
+        INSERT INTO task_logs (task_type, task_input, task_output, metadata)
+        VALUES (
+            '$task_type', 
+            '$(sqlite3_escape "$input")', 
+            '$(sqlite3_escape "$output")', 
+            '$(sqlite3_escape "$metadata")'
+        );
+EOF
+}
+
+# --- Utility Functions ---
+download_and_unzip() {
+    local url="$1"
+    local destination="${2:-./}"
+    
+    log_event "INFO" "Downloading: $url"
+    
+    local temp_file=$(mktemp)
+    
+    if curl -L -s "$url" -o "$temp_file"; then
+        if file "$temp_file" | grep -q "Zip archive"; then
+            unzip -q "$temp_file" -d "$destination"
+            log_event "SUCCESS" "Downloaded and extracted to $destination"
+        else
+            mv "$temp_file" "$destination"
+            log_event "SUCCESS" "Downloaded to $destination"
+        fi
+    else
+        log_event "ERROR" "Download failed: $url"
+        return 1
+    fi
+}
+
+file_search() {
+    local pattern="$1"
+    local path="${2:-.}"
+    
+    log_event "INFO" "Searching for: $pattern in $path"
+    
+    if command -v rg >/dev/null 2>&1; then
+        rg --color=always -n "$pattern" "$path"
+    else
+        grep -r --color=always -n "$pattern" "$path" 2>/dev/null || true
+    fi
+}
+
+lint_code() {
+    local file="$1"
+    local linter="${2:-auto}"
+    
+    if [[ "$linter" == "auto" ]]; then
+        case "$file" in
+            *.js|*.ts) linter="eslint" ;;
+            *.py) linter="pylint" ;;
+            *.sh) linter="shellcheck" ;;
+            *) echo "No linter configured for $file" && return 1 ;;
+        esac
+    fi
+    
+    case "$linter" in
+        "eslint") npx eslint "$file" ;;
+        "pylint") pylint "$file" ;;
+        "shellcheck") shellcheck "$file" ;;
+        *) echo "Unknown linter: $linter" && return 1 ;;
+    esac
+}
+
+# --- BTC Simulation ---
+btc_simulate() {
+    local action="$1"
+    local amount="${2:-0}"
+    
+    case "$action" in
+        "wallet-connect")
+            echo "🔗 Simulating wallet connection..."
+            echo "Wallet: simulated_wallet_${RANDOM:0:8}"
+            echo "Balance: $(($RANDOM % 10000)) satoshis"
+            ;;
+        "analyze")
+            echo "📊 Market analysis: $(($RANDOM % 100))% volatility"
+            echo "Trend: $((RANDOM % 3)) (0=down, 1=stable, 2=up)"
+            ;;
+        "buy")
+            echo "🔼 Simulated buy: $amount satoshis"
+            echo "Tx: simulated_tx_${RANDOM:0:16}"
+            ;;
+        "sell")
+            echo "🔽 Simulated sell: $amount satoshis" 
+            echo "Tx: simulated_tx_${RANDOM:0:16}"
+            ;;
+        *)
+            echo "Unknown BTC action: $action"
+            ;;
+    esac
+}
+
+# --- WebKit Simulation ---
+webkit_simulate() {
+    local action="$1"
+    
+    case "$action" in
+        "clone")
+            echo "📦 Simulating WebKit clone..."
+            echo "Repository: git://git.webkit.org/WebKit.git"
+            echo "Status: Cloned (simulated)"
+            ;;
+        "build")
+            echo "🔨 Simulating WebKit build..."
+            echo "Build system: CMake"
+            echo "Status: Built successfully (simulated)"
+            ;;
+        "test")
+            echo "🧪 Running simulated tests..."
+            echo "Tests passed: $((RANDOM % 1000))"
+            echo "Tests failed: $((RANDOM % 10))"
+            ;;
+        *)
+            echo "Unknown WebKit action: $action"
+            ;;
+    esac
+}
+
+# --- Main CLI Interface ---
+show_help() {
+    cat <<- EOF
+Autonomic Intelligence Platform v$VERSION
+
+USAGE:
+    ai "prompt"                     # Multi-model reasoning with prompt
+    ai hash <string|file>          # Generate hash of string or file
+    ai download <url> [dest]       # Download and extract file
+    ai search <pattern> [path]     # Search files with regex
+    ai lint <file> [linter]        # Lint code file
+    ai btc <action> [amount]       # BTC wallet simulation
+    ai webkit <action>             # WebKit build simulation
+    ai logs                        # Show recent activity logs
+    ai status                      # Show system status
+    ai --help                      # Show this help
+
+EXAMPLES:
+    ai "Explain quantum computing in simple terms"
+    ai hash "hello world"
+    ai download https://example.com/file.zip
+    ai search "function.*calculate" ./src
+    ai lint script.py
+    ai btc wallet-connect
+    ai webkit build
+
+MODELS:
+    code   - Technical reasoning and programming
+    coin   - Context-aware and emotional intelligence  
+    2244   - Language prioritization (German/English)
+    core   - Core logical reasoning
+    loop   - Iterative improvement and synthesis
+EOF
+}
+
+show_status() {
+    echo "🤖 Autonomic Intelligence Platform Status"
+    echo "========================================"
+    echo "Version: $VERSION"
+    echo "Database: $CORE_DB"
+    echo "Swap Directory: $SWAP_DIR"
+    echo "Log File: $LOG_FILE"
+    
+    # Check OLLAMA status
+    if curl -s "${OLLAMA_BASE}/api/tags" > /dev/null; then
+        echo "OLLAMA: ✅ Connected"
+    else
+        echo "OLLAMA: ❌ Offline (using fallbacks)"
+    fi
+    
+    # Database stats
+    local mindflow_count=$(sqlite3 "$CORE_DB" "SELECT COUNT(*) FROM mindflow;" 2>/dev/null || echo "0")
+    local task_count=$(sqlite3 "$CORE_DB" "SELECT COUNT(*) FROM task_logs;" 2>/dev/null || echo "0")
+    
+    echo "Mindflow Records: $mindflow_count"
+    echo "Task Logs: $task_count"
+    echo "Active Models: ${#MODELS[@]}"
+}
+
+show_logs() {
+    local limit="${1:-10}"
+    
+    echo "📋 Recent Activity Logs"
+    echo "========================================"
+    
+    if [[ -f "$LOG_FILE" ]]; then
+        tail -n "$limit" "$LOG_FILE"
+    else
+        echo "No logs found."
+    fi
+}
+
+# --- Main Execution ---
+main() {
+    # Initialize database on first run
+    if [[ ! -f "$CORE_DB" ]]; then
+        init_database
+        log_event "SYSTEM" "Database initialized at $CORE_DB"
+    fi
+    
+    case "${1:-}" in
+        "hash")
+            if [[ -f "$2" ]]; then
+                hash_file "$2"
+            else
+                hash_string "${2:-}"
+            fi
+            ;;
+        "download")
+            download_and_unzip "$2" "${3:-}"
+            ;;
+        "search")
+            file_search "$2" "${3:-}"
+            ;;
+        "lint")
+            lint_code "$2" "${3:-auto}"
+            ;;
+        "btc")
+            btc_simulate "$2" "${3:-0}"
+            ;;
+        "webkit")
+            webkit_simulate "$2"
+            ;;
+        "logs")
+            show_logs "$2"
+            ;;
+        "status")
+            show_status
+            ;;
+        "--help"|"-h"|"help")
+            show_help
+            ;;
+        "")
+            show_help
+            ;;
+        *)
+            # Default: treat as prompt for autonomic reasoning
+            autonomic_reasoning "$*"
+            ;;
+    esac
+}
+
+# Ensure required commands are available
+check_dependencies() {
+    local deps=("sqlite3" "curl" "jq" "gzip")
+    local missing=()
+    
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            missing+=("$dep")
+        fi
+    done
+    
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "Missing dependencies: ${missing[*]}" >&2
+        echo "Please install them to use the AI platform." >&2
+        exit 1
+    fi
+}
+
+# Run dependency check and main
+check_dependencies
+main "$@"

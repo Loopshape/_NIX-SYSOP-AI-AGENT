@@ -9,11 +9,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^19.1.1",
     "@google/genai": "^1.21.0",
-    "react-dom": "^19.1.1",
+    "@grpc/grpc-js": "^1.14.0",
+    "@walletconnect/client": "^1.8.0",
+    "@walletconnect/web3-provider": "^1.8.0",
+    "axios": "^1.12.2",
+    "ethers": "^6.15.0",
+    "lightning": "^10.27.1",
     "lucide-react": "^0.417.0",
     "marked": "^13.0.2",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
     "react-syntax-highlighter": "^15.5.0"
   },
   "devDependencies": {
