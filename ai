@@ -38,7 +38,7 @@ fi
 QUERY_OUTPUT=""
 QUERY_ERROR=""
 set +e
-QUERY_OUTPUT=$(ollama run 2244:latest --json "$PROMPT" 2> >(QUERY_ERROR=$(cat); typeset -p QUERY_ERROR >/dev/stderr))
+QUERY_OUTPUT=$(ollama run 2244:latest "$PROMPT" 2> >(QUERY_ERROR=$(cat); typeset -p QUERY_ERROR >/dev/stderr))
 EXIT_CODE=$?
 set -e
 
