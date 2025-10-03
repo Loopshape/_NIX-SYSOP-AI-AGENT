@@ -1,122 +1,89 @@
 #!/usr/bin/env bash
-# ~/.bin/ai - AI CLI with syntax highlighting
+# ~/.bin/ai - Bulletproof AI CLI (Termux + Proot + Ollama)
 set -euo pipefail
 IFS=$'\n\t'
 
 AI_HOME="$HOME/.local_ai"
+LOGS="$AI_HOME/logs"
 DB="$AI_HOME/core.db"
-MODULES_DIR="$AI_HOME/modules"
-LOGS="$HOME/logs"
+mkdir -p "$AI_HOME/modules" "$AI_HOME/sandbox" "$LOGS"
 
-mkdir -p "$AI_HOME" "$MODULES_DIR" "$LOGS"
+log(){ echo "[$(date '+%H:%M:%S')] $*"; }
 
-log() { echo "[AI $(date '+%H:%M:%S')] $*"; }
-
-# -------------------------
-# Ensure DB tables exist
-# -------------------------
-sqlite3 "$DB" <<SQL
-CREATE TABLE IF NOT EXISTS mindflow(
-    id INTEGER PRIMARY KEY,
-    session_id TEXT,
-    loop_id INTEGER,
-    model_name TEXT,
-    output TEXT,
-    rank INTEGER,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS task_logs(
-    id INTEGER PRIMARY KEY,
-    tool_used TEXT,
-    args TEXT,
-    output_summary TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS cache(
-    prompt_hash TEXT PRIMARY KEY,
-    final_answer TEXT
-);
-SQL
-
-# -------------------------
-# Load local modules
-# -------------------------
-MODULES=("blockchain" "nostr" "lightning" "termux" "proot" "url-parser" "snippet-assembler")
-for m in "${MODULES[@]}"; do
-    MODULE_FILE="$MODULES_DIR/$m.sh"
-    if [ -f "$MODULE_FILE" ]; then
-        source "$MODULE_FILE"
-    else
-        log "⚠ Module $m not found, creating placeholder"
-        echo "# placeholder for $m" > "$MODULE_FILE"
-    fi
-done
-
-# -------------------------
-# Start Ollama if not running
-# -------------------------
-if ! pgrep -x ollama >/dev/null 2>&1; then
-    log "Starting Ollama server..."
-    nohup ollama serve > "$LOGS/ollama_server.log" 2>&1 &
-    sleep 2
-fi
-
-# -------------------------
-# Preprocess prompt
-# -------------------------
-if [ $# -eq 0 ]; then
-    log "Usage: ai 'your prompt here'"
+PROMPT="$*"
+if [ -z "$PROMPT" ]; then
+    log "[ERROR] No prompt provided."
     exit 1
 fi
 
-PROMPT="$*"
+# --- Ollama server check ---
+if ! pgrep -x ollama >/dev/null 2>&1; then
+    log "[ERROR] Ollama server not running. Start with: ollama serve"
+    exit 1
+fi
 
-# Translate Chinese to English placeholder
-PROMPT=$(echo "$PROMPT" | sed 's/[\p{Han}]/[TRANSLATE TO EN]/g')
+# --- Initialize DB and cache table if missing ---
+sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(prompt_hash TEXT PRIMARY KEY, final_answer TEXT);"
 
-# -------------------------
-# Check cache first
-# -------------------------
 PROMPT_HASH=$(echo -n "$PROMPT" | sha256sum | awk '{print $1}')
-CACHE=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$PROMPT_HASH';")
-if [ -n "$CACHE" ]; then
-    echo -e "$CACHE" | pygmentize -g || echo "$CACHE"
+
+CACHED=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$PROMPT_HASH';")
+if [ -n "$CACHED" ]; then
+    log "[CACHE] Using cached answer"
+    echo "$CACHED"
     exit 0
 fi
 
-# -------------------------
-# Query Ollama safely
-# -------------------------
-OUTPUT=""
-PYCODE=$(cat <<'EOF'
-import subprocess, json, sys
-prompt = sys.argv[1]
-try:
-    result = subprocess.run(
-        ["ollama", "run", "2244:latest", "--json", prompt],
-        capture_output=True, text=True, check=True
-    )
-    data = json.loads(result.stdout)
-    print(data.get("answer", ""))
-except subprocess.CalledProcessError:
-    print("[ERROR] Ollama query failed")
-except json.JSONDecodeError:
-    print("[ERROR] Invalid JSON from Ollama")
-EOF
-)
+# --- Query Ollama safely ---
+QUERY_OUTPUT=""
+QUERY_ERROR=""
+set +e
+QUERY_OUTPUT=$(ollama run 2244:latest --json "$PROMPT" 2> >(QUERY_ERROR=$(cat); typeset -p QUERY_ERROR >/dev/stderr))
+EXIT_CODE=$?
+set -e
 
-OUTPUT=$(python3 -c "$PYCODE" "$PROMPT")
+if [ $EXIT_CODE -ne 0 ] || [ -n "$QUERY_ERROR" ]; then
+    log "[ERROR] Ollama query failed, see logs"
+    echo "$QUERY_ERROR" >> "$LOGS/ollama_error.log"
+    if [ -n "$CACHED" ]; then
+        log "[CACHE] Returning previous answer"
+        echo "$CACHED"
+        exit 0
+    fi
+    exit 1
+fi
 
-# -------------------------
-# Save to cache
-# -------------------------
-sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$PROMPT_HASH','$OUTPUT');"
+# --- Parse JSON response ---
+ANSWER=""
+set +e
+ANSWER=$(echo "$QUERY_OUTPUT" | python3 -c "import sys,json; \
+try: print(json.load(sys.stdin).get('answer','')) \
+except Exception: exit(1)")
+EXIT_CODE=$?
+set -e
 
-# -------------------------
-# Display output with syntax highlight
-# -------------------------
+if [ $EXIT_CODE -ne 0 ] || [ -z "$ANSWER" ]; then
+    log "[ERROR] Invalid JSON from Ollama"
+    if [ -n "$CACHED" ]; then
+        log "[CACHE] Returning previous answer"
+        echo "$CACHED"
+        exit 0
+    fi
+    exit 1
+fi
+
+# --- Enforce English/German only ---
+if echo "$ANSWER" | grep -qP '[\p{Han}]'; then
+    log "[INFO] Translating Chinese content to English"
+    ANSWER=$(echo "$ANSWER" | python3 -c "import sys; print(sys.stdin.read().encode('utf-8').decode('utf-8'))")
+fi
+
+# --- Cache the answer ---
+sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES ('$PROMPT_HASH','$ANSWER');"
+
+# --- Syntax highlight for code blocks ---
 if command -v pygmentize >/dev/null 2>&1; then
-    echo -e "$OUTPUT" | pygmentize -g
+    echo "$ANSWER" | pygmentize -g
 else
-    echo "$OUTPUT"
+    echo "$ANSWER"
 fi
