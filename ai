@@ -1,136 +1,101 @@
 #!/usr/bin/env bash
-# One-Shot AI CLI Installer & Launcher (fixed)
-set -euo pipefail; IFS=$'\n\t'
+# ~/.bin/ai - Fixed robust AI CLI for Termux/Proot
+
+set -euo pipefail
+IFS=$'\n\t'
 
 AI_HOME="${HOME}/.local_ai"
 SWAP="$AI_HOME/swap"
 SANDBOX="$AI_HOME/sandbox"
 DB="$AI_HOME/core.db"
-HTML_EXPORT="$AI_HOME/last_output.html"
-PYTHON_BIN=$(which python3)
-
 mkdir -p "$SWAP" "$SANDBOX" "$AI_HOME/modules"
 
 log(){ echo "[$(date '+%H:%M:%S')] $*"; }
 
-# --- Core dependencies ---
-log "Installing core dependencies..."
-apt update && apt install -y python3-full curl wget git unzip nodejs clang build-essential
+# --- Load environment ---
+[ -f "$HOME/.env" ] && source "$HOME/.env"
+log "🔑 Environment loaded from ~/.env"
 
-# --- Ollama CLI ---
-if ! command -v ollama &>/dev/null; then
-  log "Downloading Ollama CLI..."
-  curl -L -o /tmp/ollama.tar.gz https://ollama-releases.s3.amazonaws.com/ollama-cli-latest-linux.tar.gz
-  tar -xzf /tmp/ollama.tar.gz -C /tmp
-  chmod +x /tmp/ollama
-  mv /tmp/ollama /usr/local/bin/
-  log "Ollama installed."
-fi
-
-# --- Pull Modules ---
-for m in blockchain nostr lightning termux proot url-parser snippet-assembler; do
-  curl -s -L -o "$AI_HOME/modules/$m.sh" "https://raw.githubusercontent.com/user/ai/modules/$m.sh" || true
+# --- Mandatory dependencies ---
+for pkg in python3-full curl wget sqlite3; do
+    if ! command -v $pkg &>/dev/null; then
+        log "Installing missing $pkg..."
+        apt install -y $pkg || brew install $pkg || npm install -g $pkg || pip install $pkg
+    fi
 done
 
-# --- Initialize Core DB safely ---
+# --- Initialize database if missing ---
 if [ ! -f "$DB" ]; then
-  log "Initializing AI core database..."
-  sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS mindflow(
-    id INTEGER PRIMARY KEY,
-    session_id TEXT,
-    loop_id INTEGER,
-    model_name TEXT,
-    output TEXT,
-    rank INTEGER,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-  );"
-  sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS task_logs(
-    id INTEGER PRIMARY KEY,
-    tool_used TEXT,
-    args TEXT,
-    output_summary TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-  );"
-  sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS cache(
-    prompt_hash TEXT PRIMARY KEY,
-    final_answer TEXT
-  );"
+    log "Initializing AI core database..."
+    sqlite3 "$DB" "
+    CREATE TABLE IF NOT EXISTS mindflow(
+        id INTEGER PRIMARY KEY,
+        session_id TEXT,
+        loop_id INTEGER,
+        model_name TEXT,
+        output TEXT,
+        rank INTEGER,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS task_logs(
+        id INTEGER PRIMARY KEY,
+        tool_used TEXT,
+        args TEXT,
+        output_summary TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS cache(
+        prompt_hash TEXT PRIMARY KEY,
+        final_answer TEXT
+    );
+    "
 fi
 
-# --- Highlight output safely ---
-highlight_output() {
-    local text="$1"
-
-    # Escape quotes/backslashes for Python multiline string
-    text_escaped=$(echo "$text" | sed 's/\\/\\\\/g; s/"/\\"/g')
-
-    "$PYTHON_BIN" - <<EOF
-import re
-from rich.console import Console
-from rich.syntax import Syntax
-console = Console(record=True)
-
-blocks = re.split(r'```(.*?)```', """$text_escaped""", flags=re.DOTALL)
-grouped = []
-
-i = 0
-while i < len(blocks):
-    if i + 1 < len(blocks):
-        code = blocks[i+1]
-        lang = "text"
-        try:
-            from pygments.lexers import guess_lexer
-            lexer = guess_lexer(code)
-            lang = lexer.name.lower()
-        except Exception:
-            pass
-        syntax = Syntax(code, lang, theme="monokai", line_numbers=True)
-        grouped.append(syntax)
-        i += 2
-    else:
-        if blocks[i].strip():
-            grouped.append(blocks[i])
-        i += 1
-
-for g in grouped:
-    console.print(g)
-
-console.save_html("$HTML_EXPORT", inline_styles=True)
-EOF
-
-    echo "[*] Exported last AI output to $HTML_EXPORT"
-}
-
-# --- AI prompt handler ---
-ai_run() {
+# --- Function to query AI backend ---
+ai_query() {
     local prompt="$1"
+    # Curl request to local AI server
+    raw_response=$(curl -s -X POST "http://localhost:8080/ask" \
+        -H "Content-Type: application/json" \
+        -d "{\"prompt\":\"$prompt\"}")
 
-    # Only English or German
-    response=$(curl -s -X POST "http://localhost:8080/ask" -d "{\"prompt\":\"$prompt\"}" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('answer',''))")
-    
-    # Auto-translate any Chinese to English
-    response=$(echo "$response" | python3 -c 'import sys; import re; text=sys.stdin.read(); print(re.sub(r"[\u4e00-\u9fff]+", "[Chinese->English]", text))')
+    # Parse JSON safely
+    answer=$(echo "$raw_response" | python3 -c "
+import sys, json
+try:
+    r = json.load(sys.stdin)
+    ans = r.get('answer','')
+    # Auto-translate Chinese to English
+    if any('\u4e00' <= c <= '\u9fff' for c in ans):
+        import subprocess
+        ans = subprocess.run(['trans', '-b', 'en'], input=ans, text=True, capture_output=True).stdout.strip()
+    print(ans)
+except Exception:
+    print('[!] No valid JSON response. Check if AI server is running.')
+")
 
-    highlight_output "$response"
+    # Cache result
+    hash=$(echo -n "$prompt" | md5sum | cut -d' ' -f1)
+    sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$hash', '$(echo "$answer" | sed "s/'/''/g")');"
 
-    # Cache last response
-    prompt_hash=$(echo -n "$prompt" | sha256sum | awk "{print \$1}")
-    sqlite3 "$DB" "INSERT OR REPLACE INTO cache(prompt_hash, final_answer) VALUES('$prompt_hash', '$(echo "$response" | sqlite3_escape)');"
+    echo "$answer"
 }
 
-# --- SQLite escape helper ---
-sqlite3_escape() {
-    sed "s/'/''/g" | tr -d '\n'
-}
-
-# --- Main ---
+# --- Main CLI ---
 if [ $# -eq 0 ]; then
-    echo "Usage: ai 'your prompt'"
-    exit 1
+    log "Usage: ai 'your prompt here'"
+    exit 0
 fi
-
-log "Loading environment variables..."
-[ -f "$HOME/.env.local" ] && source "$HOME/.env.local"
 
 PROMPT="$*"
-ai_run "$PROMPT"
+
+# Check cache first
+hash=$(echo -n "$PROMPT" | md5sum | cut -d' ' -f1)
+cached=$(sqlite3 "$DB" "SELECT final_answer FROM cache WHERE prompt_hash='$hash';")
+if [ -n "$cached" ]; then
+    echo "$cached"
+    exit 0
+fi
+
+# Query AI backend
+ai_query "$PROMPT"
