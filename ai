@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ai_launch.sh - Bulletproof launcher for Local AI (Termux + Proot)
+# ai.sh - Bulletproof launcher for Local AI (Termux + Proot)
 # Enhancements: Robust path handling, better error checks, safer SQLite, improved Ollama communication, and stricter module validation.
 set -euo pipefail; IFS=$'\n\t'
 
