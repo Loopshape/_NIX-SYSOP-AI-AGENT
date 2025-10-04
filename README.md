@@ -1,104 +1,258 @@
 ---
 
-COMMANDLINE
-# Hilfe
-ai help
+1. Core Features
 
-# Multi-Model reasoning
-ai "fix index.html"
+Proof Tracking (Blockchain Strain)
 
-# Utilities
-ai hash <file_or_string>
-ai download <url> [filename]
-ai scan <pattern> [dir]
-ai lint <file>
+ProofTracker class generates a cryptographic hash from user prompts or timestamp.
 
-# Wallet & BTC
-ai wallet
-ai btc buy 1000
-ai btc sell 0.01
+Maintains three dependent indices:
 
-# WebKit Build Simulation
-ai webkit-build
+1. cycleIndex → primary string-length-based index.
 
-# Self-Healing / Updating
-ai import-snippet <url_or_file>
-ai update-repo <project_hash>
 
-# Start interactive Web UI
-ai serve
+2. netWorthIndex → derived modulus-based counter.
 
-+++
 
-### 1. **Understand Satoshi Nakamoto**
-   - Research his life before Bitcoin, including early career
-milestones and awards received.
-   - Familiarize yourself with his work in blockchain
-technology and cryptocurrency.
+3. entropyRatio → derived XOR/division ratio.
 
-### 2. **Website Structure**
-   - **Intro Page:** Introduce the site welcoming visitors,
-mention the creator (Satoshi Nakamoto) and the purpose of the
-page.
-   - **Bitcoin Overview:** Explain what Bitcoin is, its
-significance, and current market trends.
-   - **Cryptocurrency History:** Provide a section on
-historical trends in cryptocurrencies, including Bitcoin's
-dominance.
 
-### 3. **Technology Explanation**
-   - Break down Bitcoin's mechanics using simple
-explanations, focusing on blockchain concepts like nodes,
-transactions, and double-spending.
-   - Include diagrams or visual aids to illustrate these
-points.
 
-### 4. **Engagement Features**
-   - **Interactive Elements:** Consider including videos to
-showcase Nakamoto's work or personal projects (e.g., "Satoshi
-Nakamoto" in Bitcoin-related content).
-   - **User Interaction:** Offer interactive elements like
-quizzes on blockchain concepts to engage users.
+Implements “One Cycle Per Boolean Transformation”:
 
-### 5. **Social Media Presence**
-   - Enhance Facebook by adding a section with featured
-posts, showcasing Nakamoto and his work.
+Only allows the cycleIndex to increment once per convergence check.
 
-### 6. **SEO Optimization**
-   - Use keywords like "Satoshi Nakamoto Bitcoin," "Bitcoin
-technology," in titles and descriptions.
-   - Ensure mobile-friendliness for broader reach.
 
-### 7. **Future Trends**
-   - Discuss upcoming trends in the cryptocurrency space,
-influenced by Nakamoto's work and future tech advancements.
+Supports entropy crosslining:
 
-### 8. **Content Strategy**
-   - Mix informative text with videos for visual learners.
-   - Include testimonials or success stories to connect
-readers with users who have used Bitcoin.
+Incorporates external entropy (e.g., URLs, timestamps) into counters.
 
-### 9. **Design Considerations**
-   - A clean, professional layout using green tones for
-Bitcoin imagery.
-   - Clear typography and well-organized sections for easy
-navigation.
 
-### 10. **Technical Depth (Optional)**
-   - Simplify blockchain concepts in explanations to cater to
-a general audience.
-   - Provide deeper insights or links to resources for those
-with technical interests.
+Tracks netWorthCondition:
 
-### 11. **Additional Sections**
-   - Future Impact: Explore how Bitcoin is shaping other
-fields beyond the economy.
-   - Contact Form: Allow visitors to reach out and learn
-more.
-   - FAQ Section: Answer common questions about Bitcoin
-and Nakamoto's work.
+Rooted value depending on even/odd cycleIndex.
 
-By following this structured approach, the website will
-effectively inform, engage, and cater to a diverse audience
-while highlighting Nakamoto's contributions to the digital
-age.
+
+Provides getCurrentState() → snapshot of all indices, hashes, and ratios.
+
+
+
+---
+
+2. File Handling and Persistence
+
+AIDataStore
+
+Stores:
+
+memories → prompts, outputs, task IDs, and proof states.
+
+blobs → files written to disk + metadata (language, preview, path).
+
+events → logs for auditing (build steps, errors, hashes, git actions).
+
+schemas → future support for SQL/DB schema persistence.
+
+
+File Writing:
+
+Writes files to CONFIG.OUTPUT_DIR using project-specific subfolders.
+
+Syntax highlighting preview (first 5 lines in terminal).
+
+Stores file preview in memory for auditing.
+
+Adds events for each file write, including errors.
+
+
+Supports dual storage:
+
+Files written to disk and stored in blobs DB.
+
+
+
+
+---
+
+3. AI Orchestration
+
+AIOrchestrator
+
+Manages multi-model recursive consensus loop:
+
+Iterates through models (CONFIG.MODEL_POOL) up to MAX_LOOPS.
+
+Collects outputs and fuses them.
+
+Checks convergence (hash equality) → triggers ProofTracker cycle.
+
+
+Handles code generation workflow:
+
+Generates code in Python/JS and adds # GENERATE_CODE markers.
+
+Stores code in output folder and blob DB.
+
+
+Provides simulated utilities:
+
+_gitRepoAutobuild → simulates git init & commit.
+
+_sshKeyManagement → simulates SSH key generation.
+
+
+Returns final project file paths and proof states.
+
+
+
+---
+
+4. CLI Management
+
+SysOpCLI
+
+Entry point for Node.js CLI.
+
+Default behavior:
+
+Scans the current directory recursively.
+
+Initializes a timestamp-based ProofTracker.
+
+Hashes each file for auditing (ignores node_modules & output folders).
+
+
+Commands:
+
+--start → prompts for project name and task, starts build workflow.
+
+--stop → stops the current workflow.
+
+--ssh → simulate SSH key generation.
+
+--wallet → simulate wallet operations.
+
+--help → prints CLI usage instructions.
+
+
+Uses ANSI color codes for:
+
+Syntax highlighting (keywords, strings, comments, functions, variables).
+
+Terminal headers, success messages, info, errors.
+
+
+
+
+---
+
+5. Syntax Highlighting Utility
+
+colorize(code, language):
+
+Applies color coding to keywords, strings, comments, and HTML/PHP tags.
+
+Supports Bash, JS, Python, PHP, SQL, HTML, CSS.
+
+
+
+
+---
+
+6. Output & Logging
+
+Event logging:
+
+Each step (memory save, file write, hash, git action) logs to events.
+
+
+Terminal feedback:
+
+Color-coded previews and status messages.
+
+Tracks file lines, language, and hash previews.
+
+
+Dual storage:
+
+Data stored in memory (DB simulation) and physically on disk.
+
+
+
+
+---
+
+7. Project Workflow
+
+Initiated with --start.
+
+Steps:
+
+1. Initialize ProofTracker.
+
+
+2. Recursive consensus across multiple models.
+
+
+3. Generate code files with syntax highlighting preview.
+
+
+4. Save to disk (output_projects/<project_name>).
+
+
+5. Update memory, blobs, and events.
+
+
+6. Simulated git commit for versioning.
+
+
+
+Terminates with:
+
+Success → project files saved + netWorthCondition logged.
+
+Failure → event logged with error and halted workflow.
+
+
+
+
+---
+
+8. Advanced Features
+
+Timestamp-based default hashing for directory scans.
+
+File scanning avoids node_modules & output folders for efficiency.
+
+Full audit trail via events for reproducibility.
+
+Supports multi-language projects with modular output handling.
+
+
+
+---
+
+✅ Summary:
+This is a self-contained, modular AI orchestration CLI with:
+
+Cryptographic proof tracking
+
+Multi-model consensus
+
+Syntax-highlighted code generation
+
+Recursive file/directory scanning
+
+Persistent memory & blob storage
+
+Dual storage: DB + disk
+
+Simulated git/SSH/wallet utilities
+
+ANSI terminal feedback for developer experience
+
+
+It is ready for multi-file project generation, fully auditable, and preserves proof-of-work for each task.
+
+
+---
