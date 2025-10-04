@@ -1,4 +1,4 @@
----
+
 
 1. Core Features
 
@@ -37,7 +37,6 @@ Provides getCurrentState() → snapshot of all indices, hashes, and ratios.
 
 
 
----
 
 2. File Handling and Persistence
 
