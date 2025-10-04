@@ -8,7 +8,7 @@
 # ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝
 #
 # A self-contained AI orchestration framework for local LLMs.
-# Version: 2.0.1 (Fix: Command parsing for default execution)
+# Version: 2.0.2 (Fix: Node.js dependency installation and path)
 
 # --- Environment & Configuration ---
 export AI_HOME="${AI_HOME:-$HOME/.sysop-ai}"
@@ -27,7 +27,8 @@ export OLLAMA_BIN="ollama"
 # Check for required dependencies
 check_dependencies() {
     local missing_deps=()
-    local deps=("sqlite3" "node" "python3" "git" "$OLLAMA_BIN")
+    # Added 'npm' as a required dependency for installing sqlite3
+    local deps=("sqlite3" "node" "npm" "python3" "git" "$OLLAMA_BIN")
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             missing_deps+=("$dep")
@@ -39,16 +40,37 @@ check_dependencies() {
     fi
 }
 
+# Install Node dependencies (sqlite3) locally within AI_HOME
+install_node_deps() {
+    local node_deps=("sqlite3")
+    echo "[\x1b[34mINFO\x1b[0m] Checking and installing Node.js dependencies..."
+    
+    # Use npm to install if not present, installing into the AI_HOME prefix
+    npm install "${node_deps[@]}" --prefix "$AI_HOME" &> /dev/null
+    
+    if [ -d "$AI_HOME/node_modules/sqlite3" ]; then
+        echo "[\x1b[32mSUCCESS\x1b[0m] Node.js dependencies installed/verified in $AI_HOME/node_modules."
+    else
+        echo "[\x1b[31mERROR\x1b[0m] Failed to install Node.js dependencies. Please ensure npm is accessible and try running 'npm install sqlite3 --prefix $AI_HOME' manually."
+        exit 1
+    fi
+}
+
+
 # Setup the entire AI environment, including embedded scripts
 setup_environment() {
     mkdir -p "$AI_HOME" "$TASKS_DIR" "$PROJECTS_DIR" "$DB_DIR" "$SSH_DIR"
     
+    # Check and install Node dependencies first
+    install_node_deps
+
     # Write the JavaScript Orchestrator
     cat > "$AI_HOME/orchestrator.js" << 'EOF'
 const { exec } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+// Since NODE_PATH is set in the calling shell script, 'sqlite3' should be found.
 const sqlite3 = require('sqlite3').verbose();
 
 const AI_HOME = process.env.AI_HOME;
@@ -90,7 +112,6 @@ class AIOrchestrator {
     runOllama(model, currentPrompt) {
         return new Promise((resolve, reject) => {
             console.log(`\n\x1b[34m[INFO]\x1b[0m Model \x1b[33m'${model}'\x1b[0m is thinking...`);
-            // Use the --format json flag for structured output if necessary, but keep it simple here
             const child = exec(`${OLLAMA_BIN} run ${model} "${currentPrompt.replace(/"/g, '\\"')}"`);
             let output = '';
             child.stdout.on('data', (data) => {
@@ -387,11 +408,15 @@ execute_ai_run() {
     fi
     
     log_event "TASK_START" "Prompt: $prompt"
-    node "$AI_HOME/orchestrator.js" "$prompt"
+    
+    # CRITICAL FIX: Set NODE_PATH to ensure Node can find local 'sqlite3' dependency
+    NODE_PATH="$AI_HOME/node_modules" node "$AI_HOME/orchestrator.js" "$prompt"
+    
     log_event "TASK_END" "Task finished."
 }
 
 # --- Main Execution ---
+# Check dependencies (including npm) and set up environment (including npm install)
 check_dependencies
 setup_environment
 
@@ -430,8 +455,7 @@ case "$COMMAND" in
         echo "${CONTENT:0:500}..."
         echo "---"
         # Run orchestrator with imported content as prompt
-        # Additional arguments (flags) are ignored for import for simplicity
-        node "$AI_HOME/orchestrator.js" "Summarize and analyze the following content: $CONTENT"
+        NODE_PATH="$AI_HOME/node_modules" node "$AI_HOME/orchestrator.js" "Summarize and analyze the following content: $CONTENT"
         ;;
     memories) sqlite3 -header -column "$AI_DATA_DB" "SELECT id, task_id, substr(prompt, 1, 40) as prompt, ts FROM memories ORDER BY ts DESC;" ;;
     events) sqlite3 -header -column "$AI_DATA_DB" "SELECT * FROM events ORDER BY ts DESC;" ;;
