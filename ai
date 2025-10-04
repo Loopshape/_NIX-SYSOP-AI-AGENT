@@ -1,107 +1,493 @@
-#!/usr/bin/env bash
-set -euo pipefail
-IFS=$'\n\t'
+#!/usr/bin/env node
+/**
+ * SysOp-AI Command Line Core (sysop-ai.js)
+ * -----------------------------------------------------------------------------
+ * A self-contained, object-oriented AI orchestration framework designed for 
+ * local LLMs, implementing the "Blockchain Strain" proof tracking system and 
+ * a feature-rich CLI structure.
+ * -----------------------------------------------------------------------------
+ */
 
-# ------------------------
-# Config
-# ------------------------
-AI_HOME="${AI_HOME:-$HOME/.local_ai}"
-MODULES_DIR="$AI_HOME/modules"
-DB="$AI_HOME/ai_modules.db"
-GIT_REPO_BASE="git@github.com:Loopshape/_NIX-SYSOP-AI-AGENT-by-Aris-Arjuna-Noorsanto"
-PYGMENTIZE=$(command -v pygmentize || true)
+// --- Node.js Core Imports for File System Operations (using ESM) ---
+import fs from 'fs/promises';
+import path from 'path';
+import crypto from 'crypto';
+import { fileURLToPath } from 'url';
 
-mkdir -p "$MODULES_DIR"
+// Helper for finding the current directory in ESM
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-# ------------------------
-# SQLite DB initialization / self-heal
-# ------------------------
-sqlite3 "$DB" <<'SQL'
-CREATE TABLE IF NOT EXISTS modules (
-    id INTEGER PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL,
-    path TEXT NOT NULL,
-    lang TEXT NOT NULL,
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-SQL
+// --- Simulated External Libraries & Constants ---
 
-# Register or update local modules
-for file in "$MODULES_DIR"/*.{sh,py,js}; do
-    [ -f "$file" ] || continue
-    name=$(basename "$file")
-    lang=""
-    case "$file" in
-        *.sh) lang="bash" ;;
-        *.py) lang="python" ;;
-        *.js) lang="node" ;;
-    esac
-    sqlite3 "$DB" <<SQL
-INSERT OR IGNORE INTO modules (name, path, lang) VALUES ('$name', '$file', '$lang');
-UPDATE modules SET last_updated=CURRENT_TIMESTAMP WHERE name='$name';
-SQL
-done
+// ANSI escape code definitions for simulated syntax coloring (Mandatory Highlight)
+const Color = {
+    // Primary syntax elements
+    keyword: (str) => `\x1b[35m${str}\x1b[0m`, // Magenta
+    string: (str) => `\x1b[32m${str}\x1b[0m`,  // Green
+    comment: (str) => `\x1b[90m${str}\x1b[0m`, // Gray
+    variable: (str) => `\x1b[33m${str}\x1b[0m`, // Yellow
+    function: (str) => `\x1b[36m${str}\x1b[0m`, // Cyan
+    
+    // UI elements
+    header: (str) => `\x1b[44m\x1b[37m ${str} \x1b[0m`, // Blue background, White text
+    success: (str) => `\x1b[32m\x1b[1m${str}\x1b[0m`, // Bold Green
+    error: (str) => `\x1b[31m\x1b[1m${str}\x1b[0m`,   // Bold Red
+    info: (str) => `\x1b[34m${str}\x1b[0m`,      // Blue
+    
+    plain: (str) => str,
+};
 
-# ------------------------
-# Utility Functions
-# ------------------------
-highlight_output() {
-    if [ -n "$PYGMENTIZE" ]; then
-        pygmentize -g
-    else
-        cat
-    fi
+// Global configuration
+const CONFIG = {
+    AI_HOME: path.join(process.env.HOME || __dirname, '.sysop_ai_env'),
+    MODEL_POOL: ["2244:latest", "core:latest", "loop:latest", "code:latest"],
+    MAX_LOOPS: 7,
+    OUTPUT_DIR: path.resolve(process.cwd(), 'output_projects'),
+    TASK_DIR: path.resolve(process.cwd(), 'tasks'),
+};
+
+
+/**
+ * ==============================================================================
+ * Syntax Highlighting Utility
+ * ==============================================================================
+ */
+function colorize(code, language) {
+    const lines = code.split('\n');
+    let output = [];
+
+    const patterns = {
+        // Generic keywords for Bash, JS, Python, PHP, SQL
+        keywords: /(function|const|let|var|if|else|for|while|return|new|class|import|export|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|def|class|in|for|echo|do|done|\b__\w+__\b|public|private|static|git|ssh|curl)/g,
+        strings: /("|')([^"']*)("|')/g,
+        comments: /(\/\/.*|\#.*|\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->)/g,
+        tags: /(<\/?\w+)([^>]*)(>)/g, // For HTML/PHP tags
+    };
+
+    for (const line of lines) {
+        let coloredLine = line
+            .replace(patterns.comments, (match) => Color.comment(match))
+            .replace(patterns.strings, (match) => Color.string(match))
+            .replace(patterns.keywords, (match) => Color.keyword(match));
+
+        if (['html', 'css', 'php'].includes(language)) {
+            coloredLine = coloredLine.replace(patterns.tags, (match, tag, attrs, close) => 
+                Color.function(tag) + Color.variable(attrs) + Color.function(close)
+            );
+        }
+        output.push(coloredLine);
+    }
+    return output.join('\n');
 }
 
-fetch_module() {
-    local module="$1"
-    echo "[INFO] Module '$module' missing locally. Attempting to fetch from GitHub..."
-    local git_url="$GIT_REPO_BASE/modules/$module"
-    local target_path="$MODULES_DIR/$module"
+/**
+ * ==============================================================================
+ * 1. ProofTracker Class (Implements Cryptographic Indexing Principles)
+ * ==============================================================================
+ * * Tracks state based on the string length index, dependent counters, and proofs.
+ */
+class ProofTracker {
+    constructor(initialPrompt, isDefaultMode = false) {
+        this.isDefaultMode = isDefaultMode;
+        this.originPrompt = initialPrompt;
+        this.originProofHash = this._generateHash(isDefaultMode ? Date.now().toString() : initialPrompt);
+        this.cycleIndex = isDefaultMode ? 1 : initialPrompt.length; // 1 for timestamp only
 
-    if git clone --depth 1 "$git_url" "$target_path" 2>/dev/null || curl -fsSL "$git_url" -o "$target_path"; then
-        echo "[INFO] Module fetched: $module"
-        local lang=""
-        case "$target_path" in
-            *.sh) lang="bash" ;;
-            *.py) lang="python" ;;
-            *.js) lang="node" ;;
-        esac
-        sqlite3 "$DB" <<SQL
-INSERT OR IGNORE INTO modules (name, path, lang) VALUES ('$module', '$target_path', '$lang');
-SQL
-        echo "$target_path $lang"
-    else
-        echo "[ERROR] Failed to fetch module: $module" >&2
-        return 1
-    fi
+        this.netWorthIndex = this._calculateNetWorth(this.cycleIndex);
+        this.entropyRatio = this._calculateEntropyRatio(this.cycleIndex);
+
+        this.cycledOnce = false;
+        this.netWorthCondition = 'PENDING_ROOT';
+
+        console.log(`\n${Color.header('PROOF TRACKER INITIALIZED')}`);
+        console.log(Color.info(`[PROOF] Origin Proof Hash: ${this.originProofHash.substring(0, 16)}...`));
+        console.log(Color.info(`[PROOF] Strain (Index 1): ${this.cycleIndex}`));
+    }
+
+    _generateHash(data) {
+        return crypto.createHash('sha256').update(data).digest('hex');
+    }
+
+    _calculateNetWorth(strain) {
+        return (strain * 0x7B) % 0xFFFF;
+    }
+
+    _calculateEntropyRatio(strain) {
+        return Math.min(1.0, (strain ^ 0xAF) / 0xFFF);
+    }
+
+    proofCycle(condition) {
+        if (condition && !this.cycledOnce) {
+            this.cycleIndex += 1;
+            this.cycledOnce = true;
+
+            this.netWorthIndex = this._calculateNetWorth(this.cycleIndex);
+            this.entropyRatio = this._calculateEntropyRatio(this.cycleIndex);
+
+            this._rootNetWorthCondition();
+
+            console.log(Color.success(`[PROOF] STRAIN CYCLE! New Index: ${this.cycleIndex}. Net Worth Condition updated.`));
+        } else if (this.cycledOnce) {
+            console.log(Color.comment("[PROOF] Cycle blocked: Already cycled once for this transformation."));
+        }
+    }
+
+    _rootNetWorthCondition() {
+        this.netWorthCondition = `ROOTED_${this.cycleIndex % 2 === 0 ? 'EVEN' : 'ODD'}_INDEX_${this.netWorthIndex}`;
+    }
+
+    crosslineEntropy(externalEntropy) {
+        let entropyValue = this._generateHash(externalEntropy).length;
+
+        this.netWorthIndex = (this.netWorthIndex + (entropyValue * 0x5)) % 0xFFFF;
+        this.entropyRatio = Math.min(1.0, (this.entropyRatio + (entropyValue / 1000)) % 1.0);
+
+        console.log(Color.info(`[PROOF] Entropy Crosslined. New Net Worth Index: ${this.netWorthIndex}`));
+    }
+
+    getCurrentState() {
+        return {
+            blockchainStrain: this.cycleIndex,
+            originProof: this.originProofHash,
+            netWorthCondition: this.netWorthCondition,
+            netWorthIndex: this.netWorthIndex,
+            entropyRatio: this.entropyRatio
+        };
+    }
 }
 
-# ------------------------
-# CLI Entry Point
-# ------------------------
-if [ $# -lt 1 ]; then
-    echo "Usage: ai <module_name> [args...]"
-    exit 1
-fi
 
-MODULE="$1"
-shift
+/**
+ * ==============================================================================
+ * 2. AIDataStore Class (Simulates Persistence + File Writing)
+ * ==============================================================================
+ */
+class AIDataStore {
+    constructor() {
+        this.memories = [];
+        this.blobs = [];
+        this.events = [];
+        this.schemas = [];
+    }
 
-# Lookup module in DB
-read path lang <<<$(sqlite3 "$DB" "SELECT path, lang FROM modules WHERE name='$MODULE' LIMIT 1;")
+    addEvent(data, type = 'LOG') {
+        const event = {
+            id: this.events.length + 1,
+            timestamp: new Date().toISOString(),
+            type,
+            data,
+        };
+        this.events.push(event);
+        console.log(`[EVENT: ${type}] ${data}`);
+    }
 
-# Auto-fetch missing module
-if [ -z "$path" ]; then
-    read path lang < <(fetch_module "$MODULE") || exit 1
-fi
+    async addMemory(prompt, response, taskId, proofState) {
+        const memory = {
+            id: this.memories.length + 1,
+            timestamp: new Date().toISOString(),
+            prompt,
+            response,
+            taskId,
+            proofState,
+        };
+        this.memories.push(memory);
+        this.addEvent(`Saved memory for task ${taskId}. Strain: ${proofState.blockchainStrain}`, 'MEMORY');
+    }
 
-echo "[INFO] Running $lang module: $MODULE"
+    async addBlob(filename, content, language) {
+        try {
+            const projectDir = path.join(CONFIG.OUTPUT_DIR, path.basename(filename).split('_')[0] || 'default_project');
+            await fs.mkdir(projectDir, { recursive: true });
+            
+            const fullPath = path.join(projectDir, filename);
 
-# Execute module with syntax highlighting
-case "$lang" in
-    bash) "$path" "$@" 2>&1 | highlight_output ;;
-    python) python3 "$path" "$@" 2>&1 | highlight_output ;;
-    node) node "$path" "$@" 2>&1 | highlight_output ;;
-    *) echo "[ERROR] Unknown language: $lang" ; exit 1 ;;
-esac
+            // Detailed file writing output
+            console.log(Color.header(`FILE PROCESSING: ${filename}`));
+            const lineCount = content.split('\n').length;
+            console.log(Color.info(`  > Language: ${language || 'Unknown'}`));
+            console.log(Color.info(`  > Line Count: ${lineCount}`));
+            console.log(Color.info('  > Content Preview (First 5 lines):'));
+            console.log('---');
+            console.log(colorize(content.split('\n').slice(0, 5).join('\n'), language));
+            console.log('---');
+
+            await fs.writeFile(fullPath, content, 'utf8');
+            this.addEvent(`File written to disk: ${fullPath}`, 'FS_WRITE');
+
+            const blob = {
+                id: this.blobs.length + 1,
+                created_at: new Date().toISOString(),
+                filename,
+                path: fullPath,
+                language,
+                content_preview: content.substring(0, 200),
+            };
+            this.blobs.push(blob);
+
+            return fullPath;
+
+        } catch (error) {
+            this.addEvent(`Failed to write file ${filename}: ${error.message}`, 'ERROR');
+            return null;
+        }
+    }
+}
+
+
+/**
+ * ==============================================================================
+ * 3. AIOrchestrator Class (The Main Execution Loop)
+ * ==============================================================================
+ */
+class AIOrchestrator {
+    constructor(dataStore) {
+        this.dataStore = dataStore;
+        this.projectState = {
+            isBuilding: false,
+            name: null,
+        };
+    }
+
+    // --- System / Utility Stubs (Simulation of complex operations) ---
+
+    async _gitRepoAutobuild(projectName) {
+        this.dataStore.addEvent(`Simulating Git Init and Initial Commit for ${projectName}`, 'GIT');
+        await new Promise(r => setTimeout(r, 50));
+        this.dataStore.addEvent(`Git repository initialized in ${CONFIG.OUTPUT_DIR}/${projectName}`, 'GIT_SUCCESS');
+    }
+
+    async _sshKeyManagement(action) {
+        this.dataStore.addEvent(`Simulating ${action} SSH Key Pair`, 'SECURITY');
+        await new Promise(r => setTimeout(r, 50));
+        this.dataStore.addEvent(`SSH Key Management: Action ${action} completed successfully.`, 'SECURITY_SUCCESS');
+    }
+
+    // --- LLM Interaction ---
+
+    async _runOllamaStub(modelName, prompt) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const hash = crypto.createHash('sha1').update(prompt).digest('hex');
+        
+        // Detailed, optimized JSON output (Mandatory Verbosity)
+        const rawJson = {
+            id: hash,
+            model: modelName,
+            timestamp: new Date().toISOString(),
+            input_tokens: prompt.length,
+            output_tokens: Math.floor(Math.random() * 500) + 200,
+            thinking_context_summary: `Analyzed ${prompt.length} tokens. Focusing on syntax check for Python3 and module dependencies.`,
+            response: {
+                // Simulating code output with highligtable content
+                language: 'python3',
+                data: `print("Hello, World!")\n# This is a comment\nif __name__ == "__main__":\n    print(f"Hash is: ${hash.substring(0, 6)}")\n`,
+            },
+            consensus_vote: Math.random() > 0.8 ? 'STRONG' : 'WEAK',
+        };
+
+        console.log(Color.header(`RAW MODEL OUTPUT: ${modelName}`));
+        console.log(JSON.stringify(rawJson, null, 2));
+        
+        return JSON.stringify(rawJson);
+    }
+
+    async _iterateModelsRecursive(prompt, tracker) {
+        let prevHash = "";
+        let convergenceReached = false;
+        
+        for (let i = 1; i <= CONFIG.MAX_LOOPS; i++) {
+            let currentPrompt = prompt + `\n[PREV_HASH]: ${prevHash}`;
+            let modelOutputs = [];
+            
+            this.dataStore.addEvent(`Starting Consensus Iteration ${i}`, 'CONSENSUS_START');
+
+            for (const model of CONFIG.MODEL_POOL) {
+                const jsonResult = await this._runOllamaStub(model, currentPrompt);
+                modelOutputs.push(JSON.parse(jsonResult));
+            }
+            
+            // Fused output is simplified to the most common data string
+            const fusedOutput = modelOutputs[0].response.data;
+            const currentHash = crypto.createHash('sha256').update(fusedOutput).digest('hex');
+            
+            // Check for convergence (The Boolean Transformation)
+            if (currentHash === prevHash) {
+                convergenceReached = true;
+                this.dataStore.addEvent(`Convergence reached on iteration ${i}`, 'CONSENSUS_SUCCESS');
+            } else {
+                this.dataStore.addEvent(`Divergence detected. Previous Hash: ${prevHash.substring(0, 8)}`, 'CONSENSUS_FAIL');
+            }
+            
+            // Apply the 'One Cycle Per Boolean Transformation' principle
+            tracker.proofCycle(convergenceReached); 
+            
+            if (convergenceReached) {
+                break;
+            }
+            
+            prevHash = currentHash;
+        }
+        
+        // Simulate a final file-generation directive 
+        return {
+            language: modelOutputs[0].response.language,
+            content: modelOutputs[0].response.data + `\n# GENERATE_CODE: Task completed with strain ${tracker.getCurrentState().blockchainStrain}`,
+        };
+    }
+
+    // --- Main Logic ---
+
+    async runAI(initialPrompt, projectName) {
+        if (!this.projectState.isBuilding) {
+            this.dataStore.addEvent("Error: Build process not started. Use --start flag.", 'ERROR');
+            return;
+        }
+
+        const taskId = new Date().getTime().toString(16);
+        this.dataStore.addEvent(`Starting AI Orchestration for Project ${projectName} (Task ID: ${taskId})`, 'ORCH_START');
+
+        const tracker = new ProofTracker(initialPrompt);
+        tracker.crosslineEntropy(`url_import_ts_${Date.now()}`);
+        
+        let currentContext = initialPrompt;
+        
+        // Recursive consensus and file content generation
+        const finalOutput = await this._iterateModelsRecursive(currentContext, tracker);
+        
+        await this.dataStore.addMemory(currentContext, finalOutput.content, taskId, tracker.getCurrentState());
+
+        const filename = `${projectName}_core.${finalOutput.language === 'python3' ? 'py' : 'js'}`;
+        
+        const finalFilePath = await this.dataStore.addBlob(filename, finalOutput.content, finalOutput.language);
+
+        await this._gitRepoAutobuild(projectName);
+        
+        this.dataStore.addEvent(`Task ${taskId} Complete. Final Net Worth Condition: ${tracker.getCurrentState().netWorthCondition}`, 'ORCH_END');
+        
+        return Color.success(`\n[FINAL RESULT] Project saved to: ${finalFilePath}`);
+    }
+}
+
+
+/**
+ * ==============================================================================
+ * 4. SysOpCLI Class (The Main Entry Point)
+ * ==============================================================================
+ */
+class SysOpCLI {
+    constructor() {
+        this.store = new AIDataStore();
+        this.orchestrator = new AIOrchestrator(this.store);
+    }
+
+    // Mandatory default behavior: Scan directory and initialize hash instance
+    async _runDefaultScan() {
+        const tracker = new ProofTracker('', true); // Timestamp-only hash
+        this.store.addEvent(`Initialized new hash-instance on timestamp. Strain: ${tracker.cycleIndex}`, 'INIT');
+
+        console.log(Color.header(`RECURSIVE DIRECTORY SCAN: ${process.cwd()}`));
+        await this._recursiveFileScan(process.cwd());
+    }
+
+    async _recursiveFileScan(dir) {
+        try {
+            const files = await fs.readdir(dir, { withFileTypes: true });
+            
+            for (const file of files) {
+                const fullPath = path.join(dir, file.name);
+                const relativePath = path.relative(process.cwd(), fullPath);
+                
+                // Skip the output directory itself and node_modules for cleaner output
+                if (relativePath.startsWith('node_modules') || relativePath.startsWith('output_projects')) continue;
+
+                if (file.isDirectory()) {
+                    console.log(`[DIR] ${Color.function(relativePath)}/`);
+                    await this._recursiveFileScan(fullPath);
+                } else {
+                    console.log(`[FILE] ${Color.variable(relativePath)}`);
+                    // Simulate hashing file content
+                    const fileContent = await fs.readFile(fullPath, 'utf8');
+                    const fileHash = crypto.createHash('sha256').update(fileContent).digest('hex');
+                    this.store.addEvent(`Hashed file ${relativePath} (Hash: ${fileHash.substring(0, 10)}...)`, 'HASHED');
+                }
+            }
+        } catch (err) {
+            this.store.addEvent(`Error during file scan: ${err.message}`, 'ERROR');
+        }
+    }
+
+    async _getUserInput(prompt) {
+        // Simple async readline for Node.js
+        const readline = (await import('readline')).default;
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+        });
+        return new Promise(resolve => {
+            rl.question(Color.info(prompt), answer => {
+                rl.close();
+                resolve(answer);
+            });
+        });
+    }
+
+    async run() {
+        const args = process.argv.slice(2);
+
+        if (args.length === 0) {
+            // 1. Mandatory Default Behavior
+            await this._runDefaultScan();
+            console.log(`\n${Color.info("To begin a task, use")} ${Color.keyword("--start")} ${Color.info("or view help with")} ${Color.keyword("--help")}`);
+            return;
+        }
+
+        const command = args[0];
+
+        if (command === '--start') {
+            // Project Build Workflow: Starts here
+            this.orchestrator.projectState.isBuilding = true;
+            console.log(Color.success("--- PROJECT BUILD WORKFLOW INITIATED ---"));
+
+            const projectName = await this._getUserInput("Enter Project Name (e.g., api_service): ");
+            this.orchestrator.projectState.name = projectName.trim() || 'default_project';
+
+            const prompt = await this._getUserInput("Enter Task Prompt (e.g., 'Build a Python web server with SQLite3 persistence'): ");
+            
+            if (!prompt) {
+                this.store.addEvent("Task prompt cannot be empty. Aborting build.", 'ERROR');
+                this.orchestrator.projectState.isBuilding = false;
+                return;
+            }
+
+            const result = await this.orchestrator.runAI(prompt, this.orchestrator.projectState.name);
+            console.log(result);
+
+        } else if (command === '--stop') {
+            // Project Build Workflow: Stops here
+            this.orchestrator.projectState.isBuilding = false;
+            console.log(Color.error("--- PROJECT BUILD WORKFLOW STOPPED ---"));
+
+        } else if (command === '--ssh') {
+            await this.orchestrator._sshKeyManagement(args[1] || 'GENERATE_NEW');
+
+        } else if (command === '--wallet') {
+            this.store.addEvent(`Simulating Wallet CLI operation: ${args.slice(1).join(' ')}`, 'UTILITY');
+
+        } else if (command === '--help') {
+            console.log(Color.header("SysOp-AI CLI Help"));
+            console.log(`\n${Color.keyword("Default Mode:")} Run without arguments to scan the current directory and initialize the state.`);
+            console.log(`\n${Color.keyword("Build Flow:")}`);
+            console.log(`  ${Color.keyword("--start")}   : Begin a new project build. Prompts for name and task.`);
+            console.log(`  ${Color.keyword("--stop")}    : Immediately halt the current build workflow.`);
+            console.log(`\n${Color.keyword("Utilities (Simulated):")}`);
+            console.log(`  ${Color.keyword("--ssh")}     : SSH key management (e.g., --ssh generate).`);
+            console.log(`  ${Color.keyword("--wallet")}  : Cryptocurrency wallet CLI operations.`);
+            console.log(`\n${Color.keyword("Audit:")}`);
+            console.log(`  ${Color.keyword("status")}  : Show current system status, proofs, and memory stats.`);
+        } else {
+            console.log(Color.error(`Unknown command: ${command}. Use --help for usage.`));
+        }
+    }
+}
+
+// Ensure the application runs from the CLI class
+new SysOpCLI().run();
