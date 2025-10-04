@@ -8,7 +8,7 @@
 # ╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝
 #
 # A self-contained AI orchestration framework for local LLMs.
-# Version: 2.0.0
+# Version: 2.0.1 (Fix: Command parsing for default execution)
 
 # --- Environment & Configuration ---
 export AI_HOME="${AI_HOME:-$HOME/.sysop-ai}"
@@ -90,6 +90,7 @@ class AIOrchestrator {
     runOllama(model, currentPrompt) {
         return new Promise((resolve, reject) => {
             console.log(`\n\x1b[34m[INFO]\x1b[0m Model \x1b[33m'${model}'\x1b[0m is thinking...`);
+            // Use the --format json flag for structured output if necessary, but keep it simple here
             const child = exec(`${OLLAMA_BIN} run ${model} "${currentPrompt.replace(/"/g, '\\"')}"`);
             let output = '';
             child.stdout.on('data', (data) => {
@@ -118,14 +119,19 @@ class AIOrchestrator {
             if (validResults.length === 0) return "Error: All models failed to respond.";
             
             const fusedOutput = validResults.join('\n---\n').trim();
-            if (fusedOutput === lastFusedOutput) {
+            this.proofTracker.crosslineEntropy(fusedOutput);
+
+            // Simple convergence check: check if the first 100 characters match
+            if (lastFusedOutput.substring(0, 100) === fusedOutput.substring(0, 100) && lastFusedOutput.length > 0) {
                 converged = true;
                 this.proofTracker.proofCycle(true);
             } else {
                 this.proofTracker.proofCycle(false);
             }
             lastFusedOutput = fusedOutput;
-            currentPrompt += `\n[PREVIOUS ITERATION OUTPUT]\n${fusedOutput}`;
+            
+            // Only feed back the core output, not the entire history
+            currentPrompt = systemPrompt + this.initialPrompt + `\n[PREVIOUS ITERATION OUTPUT]\n${fusedOutput}`;
             this.logEvent('CONSENSUS_LOOP', `Iteration ${i + 1}, Converged: ${converged}`);
         }
         return lastFusedOutput;
@@ -148,7 +154,8 @@ class AIOrchestrator {
 
         for (const [i, block] of blocks.entries()) {
             const ext = this.getFileExtension(block.language);
-            const fileName = `${block.language}_${i}.${ext}`;
+            // Simple file naming scheme: lang_index.ext
+            const fileName = `${block.language}_${i}.${ext}`; 
             const filePath = path.join(projectPath, fileName);
             fs.writeFileSync(filePath, block.code);
             this.saveBlob(projectName, filePath, block.code);
@@ -168,6 +175,7 @@ class AIOrchestrator {
     logEvent(type, msg) { aiDataDb.run("INSERT INTO events (event_type, message) VALUES (?, ?)", [type, msg]); }
 
     gitCommit(projectName) {
+        // Use the project directory for git operations
         exec(`git -C ${AI_HOME} add . && git -C ${AI_HOME} commit -m "feat: AI project ${projectName}"`, (err, stdout, stderr) => {
             if (err) this.logEvent('GIT_ERROR', `Failed to commit ${projectName}: ${stderr}`);
             else this.logEvent('GIT_SUCCESS', `Committed project ${projectName}`);
@@ -187,7 +195,11 @@ class AIOrchestrator {
 
 (async () => {
     const args = process.argv.slice(2);
-    const prompt = args.filter(arg => !arg.startsWith('--')).join(' ');
+    // Find the first argument that doesn't start with '--' and treat it as the prompt start
+    const promptParts = args.filter(arg => !arg.startsWith('--'));
+    const prompt = promptParts.join(' ');
+    
+    // Extract options (flags)
     const options = Object.fromEntries(args.filter(arg => arg.startsWith('--')).map(arg => arg.slice(2).split('=')));
     
     if (!prompt) process.exit(1);
@@ -208,6 +220,7 @@ try:
     from bip_utils import Bip39SeedGenerator, Bip44, Bip44Coins
     BIP_UTILS_AVAILABLE = True
 except ImportError:
+    # This dependency is optional but provides core wallet functionality
     BIP_UTILS_AVAILABLE = False
 
 AI_HOME = os.path.expanduser("~/.sysop-ai")
@@ -231,6 +244,7 @@ def manage_seed(action):
     conn = sqlite3.connect(WALLET_DB_PATH)
     c = conn.cursor()
     if action == 'generate':
+        # Generate a 12-word seed
         mnemonic = Bip39SeedGenerator.FromWordsNumber(12).Generate()
         try:
             c.execute("INSERT INTO seeds (mnemonic) VALUES (?)", (mnemonic,))
@@ -248,6 +262,7 @@ def manage_wallet(action, name="default"):
     print(f"Wallet action '{action}' for wallet '{name}' is not fully implemented yet.")
 
 class APIHandler(http.server.SimpleHTTPRequestHandler):
+    # Minimal JSON response for status check
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
@@ -297,8 +312,10 @@ EOF
 
 # Log an event to console and DB
 log_event() {
+    # Escape single quotes in the message for safe sqlite insertion
+    local safe_msg=$(echo "$2" | sed "s/'/''/g")
     echo "[\x1b[34m$1\x1b[0m] $(date): $2"
-    sqlite3 "$AI_DATA_DB" "INSERT INTO events (event_type, message) VALUES ('$1', '$2');"
+    sqlite3 "$AI_DATA_DB" "INSERT INTO events (event_type, message) VALUES ('$1', '$safe_msg');"
 }
 
 # Display help message
@@ -306,11 +323,11 @@ show_help() {
     echo "SysOp-AI: A self-contained AI orchestration framework."
     echo ""
     echo "USAGE:"
+    echo "  ai <prompt> [FLAGS]     (Default behavior: runs the prompt as an AI task)"
     echo "  ai [COMMAND] [ARGUMENTS]"
-    echo "  ai <prompt> [--project=my-project]"
     echo ""
     echo "DEFAULT BEHAVIOR:"
-    echo "  If no command is given, hashes the current timestamp and lists files recursively."
+    echo "  If a command is not recognized, it is treated as a prompt and executed via 'run'."
     echo ""
     echo "COMMANDS:"
     echo "  run <prompt>        Run an AI task loop with the given prompt."
@@ -321,22 +338,19 @@ show_help() {
     echo "  ssh-key [ls|gen]    Manage SSH keys."
     echo "  seed [generate|list] Manage wallet seed phrases."
     echo "  wallet [create|list] Manage wallets (not fully implemented)."
-    echo "  server              Start the Python web server."
+    echo "  server              Start the Python web server (runs in background)."
     echo "  status              Show environment, tools, and model statuses."
     echo "  --start             Interactively start a new named project session."
     echo "  --stop              Stop the current project session."
     echo "  --help              Show this help message."
     echo ""
-    echo "FLAGS FOR 'run':"
+    echo "FLAGS (apply to 'run' or default prompt):"
     echo "  --project=<name>    Assign a name to the project for generated files."
-    echo "  --force             (Not implemented) Force regeneration."
 }
 
-# --- Command Functions ---
-
-# Default action: hash timestamp and list files
+# Default action: hash timestamp and list files (only runs if $# is 0)
 default_task() {
-    echo "No command provided. Performing default task."
+    echo "No command or prompt provided. Performing default task."
     local timestamp=$(date +%s)
     local hash=$(echo -n "$timestamp" | sha256sum | awk '{print $1}')
     echo "Timestamp: $timestamp"
@@ -358,6 +372,25 @@ manage_ssh() {
     esac
 }
 
+# --- Shared Run Logic Function ---
+# Takes the full prompt string (including flags) as argument 1
+execute_ai_run() {
+    local prompt="$1"
+    
+    # Session handling: Append --project flag if a session is active
+    if [ -f "$SESSION_FILE" ]; then
+        local proj_name=$(cat "$SESSION_FILE")
+        # Only append if the project flag wasn't already provided in the prompt
+        if ! [[ "$prompt" =~ --project= ]]; then
+            prompt="$prompt --project=$proj_name"
+        fi
+    fi
+    
+    log_event "TASK_START" "Prompt: $prompt"
+    node "$AI_HOME/orchestrator.js" "$prompt"
+    log_event "TASK_END" "Task finished."
+}
+
 # --- Main Execution ---
 check_dependencies
 setup_environment
@@ -368,8 +401,8 @@ if [ $# -eq 0 ]; then
     exit 0
 fi
 
+# The first argument is the potential command.
 COMMAND="$1"
-shift
 
 case "$COMMAND" in
     --start)
@@ -382,17 +415,14 @@ case "$COMMAND" in
         log_event "SESSION" "Stopped session."
         ;;
     run)
-        prompt="$@"
-        if [ -f "$SESSION_FILE" ]; then
-            proj_name=$(cat "$SESSION_FILE")
-            prompt="$prompt --project=$proj_name"
-        fi
-        log_event "TASK_START" "Prompt: $prompt"
-        node "$AI_HOME/orchestrator.js" "$prompt"
-        log_event "TASK_END" "Task finished."
+        shift # Remove 'run' command
+        # Use the remaining arguments as the prompt
+        execute_ai_run "$@"
         ;;
     import)
+        shift # Remove 'import' command
         URL="$1"
+        shift # Remove URL
         CONTENT=$(curl -sL "$URL")
         log_event "IMPORT" "Importing content from $URL"
         echo "Import complete. The following content will be used as context for your next 'run' command:"
@@ -400,14 +430,24 @@ case "$COMMAND" in
         echo "${CONTENT:0:500}..."
         echo "---"
         # Run orchestrator with imported content as prompt
+        # Additional arguments (flags) are ignored for import for simplicity
         node "$AI_HOME/orchestrator.js" "Summarize and analyze the following content: $CONTENT"
         ;;
     memories) sqlite3 -header -column "$AI_DATA_DB" "SELECT id, task_id, substr(prompt, 1, 40) as prompt, ts FROM memories ORDER BY ts DESC;" ;;
     events) sqlite3 -header -column "$AI_DATA_DB" "SELECT * FROM events ORDER BY ts DESC;" ;;
     blobs) sqlite3 -header -column "$BLOBS_DB" "SELECT id, project_name, file_path, length(content) as size, ts FROM blobs ORDER BY ts DESC;" ;;
-    ssh-key) manage_ssh "$@" ;;
-    seed) python3 "$AI_HOME/manager.py" seed "$@" ;;
-    wallet) python3 "$AI_HOME/manager.py" wallet "$@" ;;
+    ssh-key) 
+        shift 
+        manage_ssh "$@" 
+        ;;
+    seed) 
+        shift
+        python3 "$AI_HOME/manager.py" seed "$@" 
+        ;;
+    wallet) 
+        shift 
+        python3 "$AI_HOME/manager.py" wallet "$@" 
+        ;;
     server) python3 "$AI_HOME/manager.py" server & ;;
     status)
         echo "SysOp-AI Status"
@@ -419,9 +459,8 @@ case "$COMMAND" in
         [ -f "$SESSION_FILE" ] && echo "Active Session: $(cat "$SESSION_FILE")"
         ;;
     --help|-h) show_help ;;
-    *) # Default to 'run' if no other command matches
-        log_event "TASK_START" "Prompt: $COMMAND $@"
-        node "$AI_HOME/orchestrator.js" "$COMMAND" "$@"
-        log_event "TASK_END" "Task finished."
+    *) # Default behavior: Treat all arguments as the prompt and execute 'run' logic
+        # $COMMAND is the first word of the prompt, and $@ is the entire prompt.
+        execute_ai_run "$@"
         ;;
 esac
