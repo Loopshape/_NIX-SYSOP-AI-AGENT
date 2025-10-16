@@ -8,8 +8,8 @@ from bip_utils import Bip39SeedGenerator, Bip44, Bip44Coins
 # --- Configuration ---
 PORT = 8000
 AI_HOME = os.path.expanduser("~/.sysop-ai")
-DB_PATH = os.path.join(AI_HOME, "db", "ai_data.db")
-WALLET_DB_PATH = os.path.join(AI_HOME, "db", "wallet.db")
+DB_PATH = os.path.join(AI_HOME, ".db", ".ai_data.db")
+WALLET_DB_PATH = os.path.join(AI_HOME, ".db", ".wallet.db")
 
 # --- Wallet & Seed Management ---
 def setup_wallet_db():
