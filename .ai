@@ -2,11 +2,12 @@
 
 # ai - Autonomous Intelligence CLI
 # Multi-model reasoning framework with parallel execution and memory
+# Version 1.1.0 - Optimized with FPI scoring and cleanup routines
 
 set -euo pipefail
 
 # --- Core Configuration ---
-VERSION="1.0.0"
+VERSION="1.1.0"
 AUTHOR="Autonomic Synthesis Platform"
 
 # Model configurations
@@ -94,6 +95,15 @@ hash_directory() {
 }
 
 # --- Compression & Swap Management ---
+
+# CHANGE 1: Function to clean up old swap files
+cleanup_swap_dir() {
+    local days="${1:-30}"
+    log_event "INFO" "Cleaning up swap directory older than $days days..."
+    # Find files older than N days and delete them
+    find "$SWAP_DIR" -type f -mtime +"$days" -exec rm -f {} \; 2>/dev/null
+}
+
 compress_store() {
     local content="$1"
     local hash=$(echo "$content" | hash_string)
@@ -214,9 +224,9 @@ get_mood_context() {
     local mood=""
     
     case "$hour" in
-        06-11) mood="morning_fresh" ;;
-        12-17) mood="day_productive" ;; 
-        18-22) mood="evening_reflective" ;;
+        06|07|08|09|10|11) mood="morning_fresh" ;;
+        12|13|14|15|16|17) mood="day_productive" ;; 
+        18|19|20|21|22) mood="evening_reflective" ;;
         *) mood="night_creative" ;;
     esac
     
@@ -264,30 +274,34 @@ EOF
 }
 
 # --- Fallback Response Generation ---
+# CHANGE 2: Prepend [FALLBACK] to the response for internal handling
 generate_fallback_response() {
     local prompt="$1"
     local model_type="$2"
+    local fallback_msg=""
     
     case "$model_type" in
         "code")
-            echo "// Technical analysis unavailable. Fallback: Consider implementing solution using modular architecture with error handling."
+            fallback_msg="// Technical analysis unavailable. Fallback: Consider implementing solution using modular architecture with error handling."
             ;;
         "coin")
-            echo "Contextual analysis: Current systems offline. In such moments, reflection often reveals alternative perspectives worth exploring."
+            fallback_msg="Contextual analysis: Current systems offline. In such moments, reflection often reveals alternative perspectives worth exploring."
             ;;
         "2244")
-            echo "Sprachanalyse derzeit nicht verfügbar. Fallback: Die Fragestellung erfordert weitere Betrachtung aus verschiedenen Blickwinkeln."
+            fallback_msg="Sprachanalyse derzeit nicht verfügbar. Fallback: Die Fragestellung erfordert weitere Betrachtung aus verschiedenen Blickwinkeln."
             ;;
         "core")
-            echo "Core reasoning temporarily unavailable. Logical fallback: decompose problem into smaller subproblems and address each systematically."
+            fallback_msg="Core reasoning temporarily unavailable. Logical fallback: decompose problem into smaller subproblems and address each systematically."
             ;;
         "loop")
-            echo "Iterative synthesis paused. Consider previous outputs and identify convergence patterns for optimal solution integration."
+            fallback_msg="Iterative synthesis paused. Consider previous outputs and identify convergence patterns for optimal solution integration."
             ;;
         *)
-            echo "Analysis unavailable. Please try again when AI systems are fully operational."
+            fallback_msg="Analysis unavailable. Please try again when AI systems are fully operational."
             ;;
     esac
+    
+    echo "[FALLBACK]$fallback_msg"
 }
 
 # --- Parallel Model Execution ---
@@ -341,12 +355,12 @@ rank_and_fuse_outputs() {
     
     # Score each model's output
     for model in "${!model_outputs[@]}"; do
-        local output="${model_outputs[$model]}"
-        local score=$(calculate_output_score "$output" "$model")
+        # Scores are now integers (scaled by 100)
+        local score=$(calculate_output_score "${model_outputs[$model]}" "$model")
         scores["$model"]=$score
     done
     
-    # Sort models by score
+    # Sort models by score (integer sort -rn)
     local sorted_models=$(for model in "${!scores[@]}"; do
         echo "${scores[$model]} $model"
     done | sort -rn | cut -d' ' -f2)
@@ -364,52 +378,56 @@ rank_and_fuse_outputs() {
             "${model_outputs[$model]}" "${scores[$model]}" "${rankings[$model]}"
     done
     
-    # Weighted fusion
+    # Weighted fusion (returns the highest scored output)
     fuse_weighted_outputs model_outputs scores
 }
 
+# CHANGE 3: Switched to Floating Point Integer (FPI) arithmetic (scaled by 100)
 calculate_output_score() {
     local output="$1"
     local model="$2"
     
-    local score=0.0
+    # Score is scaled by 100: 1.0 -> 100, 0.1 -> 10, etc.
+    local score=0
     
-    # Length factor (longer responses often more detailed)
+    # Length factor: 0.1 score per word -> 10 per word in scaled integer
     local length=$(echo "$output" | wc -w)
-    score=$(echo "$score + ($length * 0.1)" | bc -l 2>/dev/null || echo "$score")
+    score=$((score + length * 10))
     
-    # Final answer bonus
+    # Final answer bonus: 50.0 score -> 5000 in scaled integer
     if [[ "$output" == *"[FINAL_ANSWER]"* ]]; then
-        score=$(echo "$score + 50" | bc -l 2>/dev/null || echo "$score")
+        score=$((score + 5000))
     fi
     
-    # Model-specific base weights
+    # Model-specific base weights (10.0 -> 1000, 15.0 -> 1500, etc.)
     case "$model" in
-        "code") score=$(echo "$score + 10" | bc -l 2>/dev/null || echo "$score") ;;
-        "core") score=$(echo "$score + 15" | bc -l 2>/dev/null || echo "$score") ;;
-        "loop") score=$(echo "$score + 12" | bc -l 2>/dev/null || echo "$score") ;;
-        *) score=$(echo "$score + 8" | bc -l 2>/dev/null || echo "$score") ;;
+        "code") score=$((score + 1000)) ;; # 10.0
+        "core") score=$((score + 1500)) ;; # 15.0
+        "loop") score=$((score + 1200)) ;; # 12.0
+        *) score=$((score + 800)) ;;      # 8.0
     esac
     
+    # Check for [FALLBACK] prefix and penalize heavily if found
+    if [[ "$output" == "[FALLBACK]"* ]]; then
+        score=$((score - 10000))
+    fi
+
     echo "$score"
 }
 
+# CHANGE 3: Switched to integer comparison
 fuse_weighted_outputs() {
     local -n outputs="$1"
     local -n weights="$2"
     
-    local total_weight=0
-    for weight in "${weights[@]}"; do
-        total_weight=$(echo "$total_weight + $weight" | bc -l 2>/dev/null || echo "$total_weight")
-    done
-    
-    # For now, return the highest weighted output
+    # For now, return the highest weighted output (which is now a clean integer)
     local best_model=""
     local best_score=-1
     
     for model in "${!weights[@]}"; do
         local score="${weights[$model]}"
-        if (( $(echo "$score > $best_score" | bc -l 2>/dev/null) )); then
+        # Using simple integer comparison
+        if [[ $score -gt $best_score ]]; then
             best_score=$score
             best_model=$model
         fi
@@ -436,6 +454,7 @@ store_model_output() {
         output_text="COMPRESSED:$compressed_hash"
     fi
     
+    # NOTE: ranking_score is now an integer, but stored in the REAL column.
     sqlite3 "$CORE_DB" <<-EOF
         INSERT INTO mindflow (
             prompt_hash, loop_number, model_name, output_text, 
@@ -487,7 +506,9 @@ autonomic_reasoning() {
         for model in "${!model_outputs[@]}"; do
             echo -e "\n🧠 ${model^^}: ${MODELS[$model]}"
             echo "----------------------------------------"
-            echo "${model_outputs[$model]:0:200}..."
+            # Remove [FALLBACK] prefix for display truncation
+            local display_output="${model_outputs[$model]#[FALLBACK]}"
+            echo "${display_output:0:200}..."
         done
         
         # Rank and fuse outputs
@@ -496,11 +517,14 @@ autonomic_reasoning() {
         # Build context for next iteration
         context=$(build_context model_outputs "$loop")
         
+        # Display fused output (remove [FALLBACK] if present)
+        local display_fused_output="${fused_output#[FALLBACK]}"
+
         echo -e "\n💡 Fused Output (Loop $loop):"
         echo "----------------------------------------"
-        echo "${fused_output:0:300}..."
+        echo "${display_fused_output:0:300}..."
         
-        # Check for final answer
+        # Check for final answer (check against the raw fused output)
         if [[ "$fused_output" == *"[FINAL_ANSWER]"* ]]; then
             final_answer_detected=true
             echo -e "\n🎯 Final answer detected!"
@@ -508,18 +532,20 @@ autonomic_reasoning() {
         fi
         
         # Loop extension heuristic
-        if [[ ${#fused_output} -lt 100 ]] && [[ $loop -lt $max_loops ]]; then
+        # NOTE: This uses the word count of the raw fused output.
+        if [[ $(echo "$fused_output" | wc -w) -lt 100 ]] && [[ $loop -lt $max_loops ]]; then
             echo -e "\n📈 Output too short, extending loops..."
             ((max_loops++))
         fi
     done
     
-    # Store final result
-    store_task_log "reasoning" "$prompt" "$fused_output" "loops=$loop,final=$final_answer_detected"
+    # Store final result (remove [FALLBACK] for final output display and log)
+    local final_output="${fused_output#[FALLBACK]}"
+    store_task_log "reasoning" "$prompt" "$final_output" "loops=$loop,final=$final_answer_detected"
     
     echo -e "\n✅ Reasoning Complete"
     echo "========================================"
-    echo "$fused_output"
+    echo "$final_output"
 }
 
 check_cached_response() {
@@ -541,7 +567,9 @@ build_context() {
     
     for model in "${!outputs[@]}"; do
         local output="${outputs[$model]}"
-        context+="\n$model: ${output:0:150}..."
+        # Remove [FALLBACK] prefix before adding to context
+        local clean_output="${output#[FALLBACK]}"
+        context+="\n$model: ${clean_output:0:150}..."
     done
     
     echo -e "$context"
@@ -762,6 +790,9 @@ main() {
         log_event "SYSTEM" "Database initialized at $CORE_DB"
     fi
     
+    # Run maintenance tasks (CHANGE 1)
+    cleanup_swap_dir 30
+    
     case "${1:-}" in
         "hash")
             if [[ -f "$2" ]]; then
@@ -825,3 +856,4 @@ check_dependencies() {
 # Run dependency check and main
 check_dependencies
 main "$@"
+: rebu
