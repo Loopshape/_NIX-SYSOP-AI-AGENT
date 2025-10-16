@@ -28,7 +28,7 @@ mkdir -p "$DB_DIR" "$SWAP_DIR"
 
 # OLLAMA configuration
 OLLAMA_BASE="http://localhost:11434"
-DEFAULT_MODEL="llama2"
+DEFAULT_MODEL="deepseek-v3.1:671b-cloud"
 
 # --- Database Initialization ---
 init_database() {
