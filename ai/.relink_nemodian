@@ -1,0 +1,26 @@
+#!/bin/bash
+# ~/.relink_nemodian
+# Termux-ready Nemodian AI workspace updater
+
+# Paths
+WORKSPACE=~/_/ai
+BASE_REPO=$WORKSPACE/nemodian_base
+BACKUP_DIR=~/ai_backup
+
+# 1. Ensure backup folder exists
+mkdir -p $BACKUP_DIR
+
+# 2. Backup base repo with timestamp
+DATE=$(date +%F-%H%M)
+BACKUP_PATH=$BACKUP_DIR/nemodian_base_$DATE
+cp -r $BASE_REPO $BACKUP_PATH
+echo "[INFO] Backup created at $BACKUP_PATH"
+
+# 3. Symlink AI CLI and API scripts
+ln -sfn $BASE_REPO/ai_agent.py $WORKSPACE/ai_agent.py
+ln -sfn $BASE_REPO/api_server.py $WORKSPACE/api_server.py
+ln -sfn $BASE_REPO/models $WORKSPACE/models
+echo "[INFO] Symlinks updated in $WORKSPACE"
+
+# 4. Optional: notify user
+echo "[INFO] Nemodian AI workspace is up-to-date and safe!"
