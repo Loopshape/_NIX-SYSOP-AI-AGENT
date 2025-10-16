@@ -5,11 +5,11 @@
 
 # --- Environment & Configuration ---
 export AI_HOME="$HOME/_/.sysop-ai"
-export TASKS_DIR="$AI_HOME/tasks"
-export PROJECTS_DIR="$AI_HOME/projects"
+export TASKS_DIR="$AI_HOME/.tasks"
+export PROJECTS_DIR="$AI_HOME/.projects"
 export DB_DIR="$AI_HOME/.db"
-export AI_DATA_DB="$DB_DIR/ai_data.db"
-export BLOBS_DB="$DB_DIR/blobs.db"
+export AI_DATA_DB="$DB_DIR/.ai_data.db"
+export BLOBS_DB="$DB_DIR/.blobs.db"
 export OLLAMA_BIN="ollama" # Assumes ollama is in PATH
 
 # --- Utility Functions ---
