@@ -6,21 +6,21 @@
 set -e
 
 # Configuration
-CONFIG_DIR="$HOME/.ai_agent"
-mkdir -p "$CONFIG_DIR"
-MEMORY_DB="$CONFIG_DIR/memory.db"
-HASH_INDEX="$CONFIG_DIR/hash_index.json"
+CONFIG_DIR="$HOME/_/.ai_agent"
+mkdir -p "$HOME/_/.$CONFIG_DIR"
+MEMORY_DB="$CONFIG_DIR/.memory.db"
+HASH_INDEX="$CONFIG_DIR/.hash_index.json"
 POOL_INDEX="$CONFIG_DIR/_pool_index.json"
-PROJECTS_DIR="$HOME/ai_projects"
-mkdir -p "$PROJECTS_DIR"
+PROJECTS_DIR="$HOME/_/.projects"
+mkdir -p "$HOME/_/.$PROJECTS_DIR"
 API_PORT=8080
-API_PID_FILE="$CONFIG_DIR/api.pid"
+API_PID_FILE="$CONFIG_DIR/.api.pid"
 
 # Model configuration
-DEFAULT_MODEL="llama3.1:8b"
+DEFAULT_MODEL="deepseek-v3.1:671b-cloud"
 AI_MODEL=${AI_MODEL:-$DEFAULT_MODEL}
-AI_TEMPERATURE=${AI_TEMPERATURE:-0.7}
-AI_TOP_P=${AI_TOP_P:-0.9}
+AI_TEMPERATURE=${AI_TEMPERATURE:-0.84}
+AI_TOP_P=${AI_TOP_P:-0.68}
 AI_SEED=${AI_SEED:-}
 
 # Color codes for output
