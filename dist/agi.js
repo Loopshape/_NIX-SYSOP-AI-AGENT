@@ -5,13 +5,13 @@ const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 
 // --- Configuration ---
-const AI_HOME = process.env.AI_HOME || `${process.env.HOME}/.sysop-ai`;
-const PROJECTS_DIR = process.env.PROJECTS_DIR || path.join(AI_HOME, 'projects');
-const AI_DATA_DB_PATH = process.env.AI_DATA_DB || path.join(AI_HOME, 'db', 'ai_data.db');
-const BLOBS_DB_PATH = process.env.BLOBS_DB || path.join(AI_HOME, 'db', 'blobs.db');
+const AI_HOME = process.env.AI_HOME || `${process.env.HOME}/_/.sysop-ai`;
+const PROJECTS_DIR = process.env.PROJECTS_DIR || path.join(AI_HOME, '.projects');
+const AI_DATA_DB_PATH = process.env.AI_DATA_DB || path.join(AI_HOME, '.db', '.ai_data.db');
+const BLOBS_DB_PATH = process.env.BLOBS_DB || path.join(AI_HOME, '.db', '.blobs.db');
 const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
 
-const MODEL_POOL = ["phi3", "llama3", "codegemma"]; // Example models
+const MODEL_POOL = ["deepseek-v3.1:671b-cloud", "gpt-oss:20b-cloud"]; // Example models
 
 // --- Database Connections ---
 const aiDataDb = new sqlite3.Database(AI_DATA_DB_PATH);
