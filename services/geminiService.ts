@@ -1,10 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ReviewItem, ReviewCategory } from "../types";
 
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-}
-
 const ai = new GoogleGenAI({ true });
 
 export const reviewCode = async (code: string, focusAreas: string[]): Promise<ReviewItem[]> => {
@@ -24,7 +20,7 @@ Ensure your entire response is a single, valid JSON array.`;
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "deepseek-v3.1:671b-cloud",
             contents: `Here is the code to review:\n\n\`\`\`\n${code}\n\`\`\``,
             config: {
                 systemInstruction: systemPrompt,
