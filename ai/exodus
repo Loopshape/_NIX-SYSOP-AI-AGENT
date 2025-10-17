@@ -1,0 +1,45 @@
+mindflow_interactive(){
+  local nid="$1"; local filter="$2"; local overlay=1
+  local nodes=($(sqlite3 "$DB_PATH" "SELECT id FROM nodes WHERE id LIKE '$nid%' ORDER BY timestamp;"))
+  local total=${#nodes[@]}; local current=0
+  while true; do
+    clear
+    update_cooldown
+    auto_collapse_nodes
+    echo -e "\e[1;36mMindflow Map + Live-Qbit + Hotkey Panel\e[0m"
+    for i in "${!nodes[@]}"; do
+      local id=${nodes[i]}
+      read intent depth entropy qbit expanded brain flag7bit state <<<$(sqlite3 -separator '|' \
+        "SELECT intent,fractal_depth,entropy,qbit_factor,expanded,brain_outputs,flag7bit,state FROM nodes WHERE id='$id';")
+      local show=1; [[ -n $filter ]] && echo "$entropy $qbit" | awk -v f="$filter" '{if(!($0 ~ f)){exit 1}}' && show=1 || show=0
+      [ $show -eq 0 ] && continue
+      local marker=" "; [ $i -eq $current ] && marker="▶"
+      local color="\e[34m"; (( $(echo "$entropy>$ENTROPY_THRESHOLD"|bc -l) )) && color="\e[31m"; (( $(echo "$qbit>$QBIT_THRESHOLD"|bc -l) )) && color="\e[32m"; (( $(echo "$entropy<0.1"|bc -l) )) && color="\e[36m"
+      if (( overlay==1 )); then
+        qbar=$(render_qbit_bar $qbit 1)
+        ebar=$(render_qbit_bar $entropy 1)
+        echo -e "${marker}$(printf '%*s' $depth)${color}${id} | ${intent} | q:${qbar} | e:${ebar} | 7b:${flag7bit} | state:${state}\e[0m"
+      else
+        echo -e "${marker}$(printf '%*s' $depth)${color}${id} | ${intent} | state:${state}\e[0m"
+      fi
+    done
+    read -rsn1 key
+    case "$key" in
+      $'\x1b') read -rsn2 key2; case "$key2" in [A) ((current>0)) && ((current--)) ;; [B) ((current<total-1)) && ((current++)) ;; esac ;;
+      "") # Enter → Collapse Node
+        local id=${nodes[current]}; read content <<<$(sqlite3 "$DB_PATH" "SELECT content FROM nodes WHERE id='$id';")
+        sqlite3 "$DB_PATH" "UPDATE nodes SET state='collapsed' WHERE id='$id';"
+        echo "$content # [FINAL_ANSWER]" > "$AI_HOME/${id}_code.py"
+        ;;
+      s) # Snapshot Trigger
+        snapshot_id=$(uuidgen)
+        nodes_json=$(sqlite3 "$DB_PATH" "SELECT json_group_array(json_object('id',id,'state',state,'qbit_factor',qbit_factor,'entropy',entropy,'brain_outputs',brain_outputs)) FROM nodes;")
+        sqlite3 "$DB_PATH" "INSERT INTO neuro_snapshots(snapshot_id,timestamp,nodes_state) VALUES('$snapshot_id',$(date +%s),'$nodes_json');"
+        echo -e "\e[1;35mNeuro snapshot saved: $snapshot_id\e[0m"
+        ;;
+      a) auto_collapse_nodes ;;
+      c) ((overlay=1-overlay)) ;; # Toggle Overlay
+      q) break ;;
+    esac
+  done
+}

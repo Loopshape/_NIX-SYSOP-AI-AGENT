@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# AGENT NEMODIAN v1.3 :: Multi-Brain Codegen + 1-Qbit Superposition + Cooldown + Auto-Collapse + Live-Qbit + Neuro Snapshot
+
+AI_HOME="${AI_HOME:-$PWD/.ai_sandbox}"
+DB_PATH="${DB_PATH:-$PWD/core.db}"
+SESSION_ID=$(uuidgen 2>/dev/null||echo $RANDOM$RANDOM)
+MODELS=("code" "coin" "2244" "core" "loop")
+API_URL="${API_URL:-http://localhost:11434}"
+
+ENTROPY_THRESHOLD="${ENTROPY_THRESHOLD:-0.5}"
+QBIT_THRESHOLD="${QBIT_THRESHOLD:-0.7}"
+SCALE_LIMIT=21000000
+STABLE_TIME=10 # Sekunden
+
+mkdir -p "$AI_HOME"
+
+check_tools(){ for t in curl jq sqlite3 bc; do command -v $t >/dev/null 2>&1 || echo "⚠️ $t not found"; done; }
+check_ollama(){ curl -sSf "$API_URL" >/dev/null 2>&1 && OLLAMA=1 || OLLAMA=0; }
+
+# --- Tables ---
+sqlite3 "$DB_PATH" "CREATE TABLE IF NOT EXISTS nodes(
+id TEXT PRIMARY KEY,
+timestamp INTEGER,
+intent TEXT,
+vector TEXT,
+entropy REAL,
+fractal_depth INTEGER,
+content TEXT,
+brain_outputs TEXT,
+qbit_factor REAL,
+flag7bit INTEGER DEFAULT 1,
+state TEXT DEFAULT 'superposition',
+expanded INTEGER DEFAULT 0,
+last_update INTEGER
+);"
+sqlite3 "$DB_PATH" "CREATE TABLE IF NOT EXISTS neuro_snapshots(
+snapshot_id TEXT PRIMARY KEY,
+timestamp INTEGER,
+nodes_state TEXT
+);"
+
+# --- Node Processing / Multi-Brain Fusion ---
+process_node(){
+  local node_json="$1"
+  local depth=$(echo "$node_json" | jq '.node.fractal_depth')
+  local content=$(echo "$node_json" | jq -r '.payload.content')
+  local entropy=$(echo "$node_json" | jq '.node.entropy')
+  local vector=$(echo "$node_json" | jq -r '.node.vector // [0.5,0.5,0.5]')
+  local flag7bit=$(echo "$node_json" | jq -r '.node.flag7bit // 1')
+  local ollama_out=""
+
+  [ "$OLLAMA" -eq 1 ] && \
+    ollama_out=$(jq -n --arg p "$content" '{prompt:$p,session:"'$SESSION_ID'"}' | \
+      xargs -0 curl -s -X POST "$API_URL" -H "Content-Type: application/json" -d @-)
+
+  for m in "${MODELS[@]}"; do vector=$(echo "$vector" | jq '[.[] * 1.01]'); done
+
+  local node_id=$(echo "$node_json" | jq -r '.node.id')
+  local brain_outputs=$(echo "${MODELS[*]}" | tr ' ' ',')
+  brain_outputs=$(echo "$brain_outputs,$ollama_out")
+
+  # Subnodes in superposition
+  local subdepth=$((depth-1))
+  if (( $(echo "$entropy>0.3 && subdepth>0" | bc -l) )); then
+    subnode=$(echo "$node_json" | jq --arg c "$content" --argjson d $subdepth \
+      '{node:{id:"sub_'$node_id'",intent:"sub_process",vector:[0.1,0.2,0.3],entropy:0.25,fractal_depth:$d,flag7bit:1},payload:{type:"prompt",content:$c}}')
+    process_node "$subnode"
+  fi
+
+  # Weighted Fusion + 7bit scaled
+  local sum=$(echo "$vector" | jq 'add')
+  local ollama_weight=$(echo "$ollama_out" | jq -r 'length/1000' 2>/dev/null || echo 0)
+  local n=$RANDOM
+  local scaled=$(echo "scale=8; (8*$n + 2*3.14159265/4)/$SCALE_LIMIT" | bc -l)
+  local qbit_factor=$(echo "$sum*0.3 + $ollama_weight*0.4 + $entropy*0.2" | bc -l)
+  qbit_factor=$(echo "$qbit_factor*(1+$flag7bit*$scaled)" | bc -l)
+
+  timestamp_now=$(date +%s)
+  sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO nodes(id,timestamp,intent,vector,entropy,fractal_depth,content,brain_outputs,qbit_factor,flag7bit,state,expanded,last_update) VALUES('$node_id',$timestamp_now,'process','$vector',$entropy,$depth,'$content','$brain_outputs',$qbit_factor,$flag7bit,'superposition',0,$timestamp_now);"
+}
+
+multi_brain_process(){ 
+  local prompt="$1"
+  local node=$(jq -n --arg p "$prompt" '{session:"'$SESSION_ID'",timestamp:'"$(date -u +%s)"',node:{id:"node_001",intent:"generate_code",vector:[0.5,0.5,0.5],entropy:0.42,fractal_depth:2,flag7bit:1},payload:{type:"prompt",content:$p}}')
+  process_node "$node"
+}
+
+# --- Cooldown / Entropy Decay ---
+update_cooldown(){ sqlite3 "$DB_PATH" "UPDATE nodes SET entropy=entropy*0.95,qbit_factor=qbit_factor*0.97 WHERE state='superposition';" ; }
+
+# --- Auto-Collapse Stable Nodes ---
+auto_collapse_nodes(){
+  local now=$(date +%s)
+  sqlite3 "$DB_PATH" "SELECT id,entropy,qbit_factor,last_update,state FROM nodes WHERE state='superposition';" | \
+  while IFS='|' read id entropy qbit last state; do
+    if (( $(echo "$entropy<0.15 && $qbit>0.3" | bc -l) )); then
+      local elapsed=$((now - last))
+      if (( elapsed >= STABLE_TIME )); then
+        sqlite3 "$DB_PATH" "UPDATE nodes SET state='collapsed', last_update=$now WHERE id='$id';"
+        read content <<<$(sqlite3 "$DB_PATH" "SELECT content FROM nodes WHERE id='$id';")
+        echo "$content # [AUTO_FINAL_ANSWER]" > "$AI_HOME/${id}_code.py"
+        echo -e "\e[1;32mNode $id auto-collapsed → FINAL_ANSWER\e[0m"
+        # Save Neuro Snapshot
+        snapshot_id=$(uuidgen)
+        nodes_json=$(sqlite3 "$DB_PATH" "SELECT json_group_array(json_object('id',id,'state',state,'qbit_factor',qbit_factor,'entropy',entropy,'brain_outputs',brain_outputs)) FROM nodes;")
+        sqlite3 "$DB_PATH" "INSERT INTO neuro_snapshots(snapshot_id,timestamp,nodes_state) VALUES('$snapshot_id',$now,'$nodes_json');"
+        echo -e "\e[1;35mNeuro snapshot saved: $snapshot_id\e[0m"
+      fi
+    fi
+  done
+}
+
+# --- Render Qbit Bar ---
+render_qbit_bar(){
+  local value=$1 max=$2 length=10
+  local filled=$(printf "%.0f" $(echo "$value/$max*$length" | bc -l))
+  local empty=$((length-filled))
+  printf "▓%.0s" $(seq 1 $filled)
+  printf "░%.0s" $(seq 1 $empty)
+}
+
+# --- Interactive Mindflow Map + Live-Qbit Overlay ---
+mindflow_interactive(){
+  local nid="$1"; local filter="$2"; local nodes=($(sqlite3 "$DB_PATH" "SELECT id FROM nodes WHERE id LIKE '$nid%' ORDER BY timestamp;"))
+  local total=${#nodes[@]}; local current=0
+  while true; do
+    clear
+    update_cooldown
+    auto_collapse_nodes
+    echo -e "\e[1;36mInteractive Mindflow Map + Live-Qbit Visualizer + Neuro Snapshot\e[0m"
+    for i in "${!nodes[@]}"; do
+      local id=${nodes[i]}
+      read intent depth entropy qbit expanded brain flag7bit state <<<$(sqlite3 -separator '|' \
+        "SELECT intent,fractal_depth,entropy,qbit_factor,expanded,brain_outputs,flag7bit,state FROM nodes WHERE id='$id';")
+      # Filter
+      local show=1; [[ -n $filter ]] && echo "$entropy $qbit" | awk -v f="$filter" '{if(!($0 ~ f)){exit 1}}' && show=1 || show=0
+      [ $show -eq 0 ] && continue
+      # Color
+      local color="\e[34m"; (( $(echo "$entropy>$ENTROPY_THRESHOLD"|bc -l) )) && color="\e[31m"; (( $(echo "$qbit>$QBIT_THRESHOLD"|bc -l) )) && color="\e[32m"; (( $(echo "$entropy<0.1"|bc -l) )) && color="\e[36m"
+      local marker=" "; [ $i -eq $current ] && marker="▶"
+      # Qbit + Entropy Bars
+      qbar=$(render_qbit_bar $qbit 1)
+      ebar=$(render_qbit_bar $entropy 1)
+      echo -e "${marker}$(printf '%*s' $depth)${color}${id} | ${intent} | q:${qbar} | e:${ebar} | 7b:${flag7bit} | state:${state}\e[0m"
+      [ "$expanded" -eq 1 ] && echo -e "$(printf '%*s' $((depth+2)))⇢ $(echo "$brain" | cut -c1-40)..."
+    done
+    read -rsn1 key
+    case "$key" in
+      $'\x1b') read -rsn2 key2; case "$key2" in [A) ((current>0)) && ((current--)) ;; [B) ((current<total-1)) && ((current++)) ;; esac ;;
+      "") local id=${nodes[current]}; read content <<<$(sqlite3 "$DB_PATH" "SELECT content FROM nodes WHERE id='$id';"); sqlite3 "$DB_PATH" "UPDATE nodes SET state='collapsed' WHERE id='$id';"; echo "$content # [FINAL_ANSWER]" > "$AI_HOME/${id}_code.py"; echo -e "\e[1;33

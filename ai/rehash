@@ -1,0 +1,39 @@
+render_qbit_bar(){
+  local value=$1 max=$2 length=10
+  local filled=$(printf "%.0f" $(echo "$value/$max*$length" | bc -l))
+  local empty=$((length-filled))
+  printf "▓%.0s" $(seq 1 $filled)
+  printf "░%.0s" $(seq 1 $empty)
+}
+
+mindflow_interactive(){
+  local nid="$1"; local filter="$2"; local nodes=($(sqlite3 "$DB_PATH" "SELECT id FROM nodes WHERE id LIKE '$nid%' ORDER BY timestamp;"))
+  local total=${#nodes[@]}; local current=0
+  while true; do
+    clear
+    update_cooldown
+    auto_collapse_nodes
+    echo -e "\e[1;36mInteractive Mindflow Map + Live-Qbit Visualizer\e[0m"
+    for i in "${!nodes[@]}"; do
+      local id=${nodes[i]}
+      read intent depth entropy qbit expanded brain flag7bit state <<<$(sqlite3 -separator '|' \
+        "SELECT intent,fractal_depth,entropy,qbit_factor,expanded,brain_outputs,flag7bit,state FROM nodes WHERE id='$id';")
+      local show=1; [[ -n $filter ]] && echo "$entropy $qbit" | awk -v f="$filter" '{if(!($0 ~ f)){exit 1}}' && show=1 || show=0
+      [ $show -eq 0 ] && continue
+      # Colors
+      local color="\e[34m"; (( $(echo "$entropy>$ENTROPY_THRESHOLD"|bc -l) )) && color="\e[31m"; (( $(echo "$qbit>$QBIT_THRESHOLD"|bc -l) )) && color="\e[32m"; (( $(echo "$entropy<0.1"|bc -l) )) && color="\e[36m"
+      local marker=" "; [ $i -eq $current ] && marker="▶"
+      # Render Qbit + Entropy bars
+      qbar=$(render_qbit_bar $qbit 1)
+      ebar=$(render_qbit_bar $entropy 1)
+      echo -e "${marker}$(printf '%*s' $depth)${color}${id} | ${intent} | q:${qbar} | e:${ebar} | 7b:${flag7bit} | state:${state}\e[0m"
+      [ "$expanded" -eq 1 ] && echo -e "$(printf '%*s' $((depth+2)))⇢ $(echo "$brain" | cut -c1-40)..."
+    done
+    read -rsn1 key
+    case "$key" in
+      $'\x1b') read -rsn2 key2; case "$key2" in [A) ((current>0)) && ((current--)) ;; [B) ((current<total-1)) && ((current++)) ;; esac ;;
+      "") local id=${nodes[current]}; read content <<<$(sqlite3 "$DB_PATH" "SELECT content FROM nodes WHERE id='$id';"); sqlite3 "$DB_PATH" "UPDATE nodes SET state='collapsed' WHERE id='$id';"; echo "$content # [FINAL_ANSWER]" > "$AI_HOME/${id}_code.py"; echo -e "\e[1;33mCollapsing Node $id → FINAL_ANSWER\e[0m";;
+      q) break ;;
+    esac
+  done
+}

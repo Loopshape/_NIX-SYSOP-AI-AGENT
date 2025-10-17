@@ -1,0 +1,5 @@
+snapshot_id=$(uuidgen)
+timestamp_now=$(date +%s)
+nodes_json=$(sqlite3 "$DB_PATH" "SELECT json_group_array(json_object('id',id,'state',state,'qbit_factor',qbit_factor,'entropy',entropy,'brain_outputs',brain_outputs)) FROM nodes;")
+sqlite3 "$DB_PATH" "INSERT INTO neuro_snapshots(snapshot_id,timestamp,nodes_state) VALUES('$snapshot_id',$timestamp_now,'$nodes_json');"
+echo -e "\e[1;35mNeuro snapshot saved: $snapshot_id\e[0m"
