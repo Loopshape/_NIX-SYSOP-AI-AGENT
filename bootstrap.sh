@@ -3,8 +3,8 @@
 # Ensures deps (apt > brew > npm > pip > curl > wget), then runs ~/.bin/ai
 
 set -euo pipefail
-AI_HOME="$HOME/.local_ai"
-BIN_DIR="$HOME/.bin"
+AI_HOME="$HOME/_/ai"
+BIN_DIR="$HOME/.env.local/bin"
 AI_CLI="$BIN_DIR/ai"
 
 log() { echo -e "[\033[92mAI-BOOT\033[0m] $*"; }

@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+transformers
+networkx
+black
+pylint
+autopep8

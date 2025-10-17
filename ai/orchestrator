@@ -1,0 +1,226 @@
+#!/bin/node
+const { exec } = require('child_process');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const sqlite3 = require('sqlite3').verbose();
+
+// --- Configuration ---
+const AI_HOME = process.env.AI_HOME || "~/_/ai";
+const PROJECTS_DIR = process.env.PROJECTS_DIR || path.join(AI_HOME, '.projects');
+const AI_DATA_DB_PATH = process.env.AI_DATA_DB || path.join(AI_HOME, '.db', '.ai_data.db');
+const BLOBS_DB_PATH = process.env.BLOBS_DB || path.join(AI_HOME, '.db', '.blobs.db');
+const OLLAMA_BIN = process.env.OLLAMA_BIN || 'ollama';
+
+const MODEL_POOL = ["deepseek-v3.1:671b-cloud", "gpt-oss:20b-cloud"]; // Example models
+
+// --- Database Connections ---
+const aiDataDb = new sqlite3.Database(AI_DATA_DB_PATH);
+const blobsDb = new sqlite3.Database(BLOBS_DB_PATH);
+
+// --- ProofTracker System ---
+class ProofTracker {
+    constructor(initialPrompt) {
+        this.cycleIndex = initialPrompt.length;
+        this.netWorthIndex = (this.cycleIndex % 128) << 2;
+        this.entropyRatio = (this.cycleIndex ^ Date.now()) / 1000;
+    }
+
+    crosslineEntropy(externalData) {
+        const hash = crypto.createHash('sha256').update(externalData).digest('hex');
+        const numericHash = parseInt(hash.substring(0, 8), 16);
+        this.entropyRatio += numericHash;
+    }
+
+    proofCycle(converged) {
+        if (converged) {
+            this.cycleIndex++;
+        } else {
+            this.netWorthIndex--;
+        }
+        // One cycle per boolean transformation
+    }
+
+    getState() {
+        return {
+            cycleIndex: this.cycleIndex,
+            netWorthIndex: this.netWorthIndex,
+            entropyRatio: this.entropyRatio,
+        };
+    }
+}
+
+// --- AI Orchestrator ---
+class AIOrchestrator {
+    constructor(prompt, options = {}) {
+        this.initialPrompt = prompt;
+        this.options = options;
+        this.taskId = crypto.createHash('sha256').update(Date.now().toString()).digest('hex');
+        this.proofTracker = new ProofTracker(prompt);
+    }
+
+    async runOllama(model, currentPrompt) {
+        console.log(`\n--- Thinking with ${model}... ---`);
+        return new Promise((resolve, reject) => {
+            const command = `${OLLAMA_BIN} run ${model} "${currentPrompt.replace(/"/g, '\\"')}"`;
+            exec(command, { maxBuffer: 1024 * 1024 * 50 }, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Error with ${model}: ${stderr}`);
+                    return reject(stderr);
+                }
+                console.log(`--- ${model} responded ---`);
+                resolve(stdout.trim());
+            });
+        });
+    }
+
+    async recursiveConsensus() {
+        let currentPrompt = this.initialPrompt;
+        let lastFusedOutput = "";
+        let converged = false;
+
+        for (let i = 0; i < 5 && !converged; i++) {
+            console.log(`\n--- Consensus Iteration ${i + 1} ---`);
+            const promises = MODEL_POOL.map(model => this.runOllama(model, currentPrompt));
+            const results = await Promise.all(promises.map(p => p.catch(e => e)));
+            
+            const validResults = results.filter(r => typeof r === 'string');
+            if (validResults.length === 0) {
+                 console.error("All models failed to respond.");
+                 return "Error: All models failed.";
+            }
+
+            const fusedOutput = validResults.join('\n---\n').trim();
+
+            if (fusedOutput === lastFusedOutput) {
+                converged = true;
+                this.proofTracker.proofCycle(true);
+            } else {
+                this.proofTracker.proofCycle(false);
+            }
+            
+            lastFusedOutput = fusedOutput;
+            currentPrompt += `\n[PREVIOUS ITERATION OUTPUT]\n${fusedOutput}`;
+            this.logEvent('CONSENSUS_LOOP', `Iteration ${i + 1}, Converged: ${converged}`);
+        }
+        return lastFusedOutput;
+    }
+
+    parseCodeBlocks(content) {
+        const regex = /```(\w+)\s*([\s\S]*?)```/g;
+        let match;
+        const blocks = [];
+        while ((match = regex.exec(content)) !== null) {
+            blocks.push({
+                language: match[1].toLowerCase(),
+                code: match[2].trim(),
+            });
+        }
+        return blocks;
+    }
+
+    async handleCodeGeneration(content) {
+        const blocks = this.parseCodeBlocks(content);
+        if (blocks.length === 0) return;
+
+        const projectName = this.options.project || `task_${this.taskId.substring(0, 8)}`;
+        const projectPath = path.join(PROJECTS_DIR, projectName);
+        fs.mkdirSync(projectPath, { recursive: true });
+
+        for (const block of blocks) {
+            const extension = this.getFileExtension(block.language);
+            const fileName = `script.${extension}`;
+            const filePath = path.join(projectPath, fileName);
+            fs.writeFileSync(filePath, block.code);
+            this.saveBlob(projectName, filePath, block.code);
+            this.validateCode(filePath, block.language);
+            console.log(`Generated file: ${filePath}`);
+        }
+        this.gitCommit(projectName);
+    }
+    
+    getFileExtension(language) {
+        const map = {
+            python: 'py', javascript: 'js', html: 'html', css: 'css',
+            php: 'php', sql: 'sql', bash: 'sh', go: 'go',
+        };
+        return map[language] || 'txt';
+    }
+
+    validateCode(filePath, language) {
+        const commands = {
+            python: `python3 -m py_compile ${filePath}`,
+            php: `php -l ${filePath}`,
+            javascript: `node -c ${filePath}`,
+            bash: `bash -n ${filePath}`,
+        };
+        if (commands[language]) {
+            exec(commands[language], (err, stdout, stderr) => {
+                if (err) {
+                    this.logEvent('VALIDATION_ERROR', `Validation failed for ${filePath}: ${stderr}`);
+                } else {
+                    this.logEvent('VALIDATION_SUCCESS', `Validation passed for ${filePath}`);
+                }
+            });
+        }
+    }
+    
+    saveMemory(prompt, response) {
+        const proofState = JSON.stringify(this.proofTracker.getState());
+        aiDataDb.run("INSERT INTO memories (task_id, prompt, response, proof_state) VALUES (?, ?, ?, ?)", 
+            [this.taskId, prompt, response, proofState]);
+    }
+
+    saveBlob(projectName, filePath, content) {
+        blobsDb.run("INSERT INTO blobs (project_name, file_path, content) VALUES (?, ?, ?)",
+            [projectName, path.basename(filePath), content]);
+    }
+
+    logEvent(type, message) {
+        aiDataDb.run("INSERT INTO events (event_type, message) VALUES (?, ?)", [type, message]);
+    }
+
+    gitCommit(projectName) {
+        exec(`git -C ${AI_HOME} add . && git -C ${AI_HOME} commit -m "feat: AI generated project ${projectName}"`, (err, stdout, stderr) => {
+            if (err) {
+                this.logEvent('GIT_ERROR', `Failed to commit ${projectName}: ${stderr}`);
+            } else {
+                this.logEvent('GIT_SUCCESS', `Committed project ${projectName}`);
+            }
+        });
+    }
+
+    async execute() {
+        this.logEvent('ORCHESTRATION_START', `Task ${this.taskId} started.`);
+        const finalOutput = await this.recursiveConsensus();
+        console.log("\n--- Final Consensus Output ---");
+        console.log(finalOutput);
+        
+        this.saveMemory(this.initialPrompt, finalOutput);
+        await this.handleCodeGeneration(finalOutput);
+
+        this.logEvent('ORCHESTRATION_END', `Task ${this.taskId} finished.`);
+    }
+}
+
+// --- Main Execution ---
+if (require.main === module) {
+    const prompt = process.argv.slice(2).join(' ');
+    if (!prompt) {
+        console.log("Usage: node orchestrator.js <prompt>");
+        process.exit(1);
+    }
+    
+    // Simple argument parsing for options
+    const options = {};
+    if (prompt.includes('--project')) {
+        const match = prompt.match(/--project\s+(\w+)/);
+        if (match) options.project = match[1];
+    }
+
+    const orchestrator = new AIOrchestrator(prompt, options);
+    orchestrator.execute().finally(() => {
+        aiDataDb.close();
+        blobsDb.close();
+    });
+}

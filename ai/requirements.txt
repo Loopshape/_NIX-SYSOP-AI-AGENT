@@ -1,9 +1,1 @@
-fastapi
-uvicorn
-transformers
-torch
-sqlite3
-networkx
-black
-pylint
-autopep8
+../requirements.txt

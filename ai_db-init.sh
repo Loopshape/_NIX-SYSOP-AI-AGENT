@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ~/.bin/ai_add_module - add shell module to AI DB
-set -euo pipefail
+#set -euo pipefail
 IFS=$'\n\t'
 
 AI_HOME="$HOME/.local_ai"
