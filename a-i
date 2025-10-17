@@ -1,0 +1,830 @@
+#!/usr/bin/env bash
+# ai.sh - AI Orchestrator Core v30 (Full Install Processor Edition)
+# A robust, self-managing agent with structured JSON decision logging.
+
+# --- RUNTIME MODE DETECTION: EMBEDDED NODE.JS WEB SERVER ---
+if [[ "${1:-}" == "serve" ]]; then
+    exec node --input-type=module - "$0" "$@" <<'NODE_EOF'
+import http from 'http';
+import { exec } from 'child_process';
+const PORT = process.env.AI_PORT || 8080;
+const AI_SCRIPT_PATH = process.argv[2];
+const HTML_UI = `
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>AI Autonomic Synthesis Platform v30</title>
+<style>:root{--bg:#0d1117;--text:#c9d1d9;--accent:#58a6ff;--secondary:#8b949e;--border:#30363d;--input-bg:#161b22;--success:#3fb950;--error:#f85149;}
+body{font-family:'SF Mono',Consolas,'Courier New',monospace;background:var(--bg);color:var(--text);margin:0;padding:20px;font-size:14px;line-height:1.6;}
+.container{max-width:1000px;margin:auto;}h1{color:var(--accent);text-align:center;border-bottom:1px solid var(--border);padding-bottom:15px;}
+.terminal{background:var(--input-bg);border:1px solid var(--border);border-radius:6px;padding:15px;margin-top:20px;height:70vh;overflow-y:scroll;display:flex;flex-direction:column;}
+.output{flex-grow:1;white-space:pre-wrap;}.input-line{display:flex;border-top:1px solid var(--border);padding-top:10px;margin-top:10px;}
+.prompt{color:var(--accent);font-weight:bold;margin-right:10px;}
+input{flex-grow:1;background:transparent;border:none;color:var(--text);font-family:inherit;font-size:inherit;outline:none;}
+.log{color:var(--secondary);}.success{color:var(--success);}.error{color:var(--error);}</style></head>
+<body><div class="container"><h1>🤖 AI Autonomic Synthesis Platform v30</h1><div class="terminal"><div id="output" class="output"><div class="log">🚀 AI Agent ready. System initialized.</div></div><div class="input-line"><span class="prompt">ai&gt;</span><input type="text" id="commandInput" placeholder="Enter your high-level goal..." autofocus></div></div></div>
+<script>
+const output=document.getElementById('output'),input=document.getElementById('commandInput');
+function addOutput(text,className='log'){const d=document.createElement('div');d.className=className;d.textContent=text;output.appendChild(d);output.scrollTop=output.scrollHeight;}
+async function executeCommand(cmd){addOutput(`ai> ${cmd}`,'prompt');input.disabled=true;try{const r=await fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:cmd})}),d=await r.json();const f=d.output.replace(/\\u001b\\[[0-9;]*m/g,'');addOutput(f,d.success?'success':'error');}catch(e){addOutput(`[CLIENT ERROR] ${e.message}`,'error');}finally{input.disabled=false;input.focus();}}
+input.addEventListener('keypress',e=>{if(e.key==='Enter'){const c=input.value.trim();if(c){executeCommand(c);input.value='';}}});
+</script></body></body></html>`;
+
+http.createServer((req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    if (req.url === '/' && req.method === 'GET') { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(HTML_UI); return; }
+    if (req.url === '/api/command' && req.method === 'POST') {
+        let body = '';
+        req.on('data', c => body += c.toString());
+        req.on('end', () => {
+            try {
+                const { command } = JSON.parse(body);
+                const sanitizedCmd = command.replace(/(["'$`\\])/g, '\\$1');
+                exec(`"${AI_SCRIPT_PATH}" "${sanitizedCmd}"`, { timeout: 600000 }, (err, stdout, stderr) => {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    if (err) { res.end(JSON.stringify({ success: false, output: `[SERVER ERROR] ${err.message}\n${stderr}` }));
+                    } else { res.end(JSON.stringify({ success: true, output: stdout || 'Command executed without output.' })); }
+                });
+            } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, output: 'Invalid JSON request.' })); }
+        });
+        return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not Found' }));
+}).listen(PORT, () => console.log(`🌐 AI Web UI is live at: http://localhost:${PORT}`));
+NODE_EOF
+fi
+# --- END OF NODE.JS SERVER BLOCK ---
+
+
+# --- BASH AGENT CORE (v30) ---
+set -euo pipefail
+IFS=$'\n\t'
+
+# ---------------- CONFIG & GLOBALS ----------------
+AI_HOME="${AI_HOME:-$HOME/_/ai}"
+PROJECTS_DIR="${PROJECTS_DIR:-$HOME/_/ai/projects}"
+LOG_FILE="$AI_HOME/ai.log"
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+CORE_DB="$AI_HOME/agent_core.db"
+
+# --- Runtime Configuration ---
+# NOTE: These models must be available in Ollama or be replaced with models that are.
+MESSENGER_MODEL="loop:latest"
+PLANNER_MODELS=("loop:latest" "core:latest")
+EXECUTOR_MODEL="2244-1:latest"
+OLLAMA_BIN="$(command -v ollama || echo 'ollama')"
+
+MAX_AGENT_LOOPS=7
+MAX_RAM_BYTES=2097152
+SWAP_DIR="$AI_HOME/swap"
+HMAC_SECRET_KEY="$AI_HOME/secret.key"
+
+# --- CLI Global Flags ---
+MODE="workflow"
+USER_PROMPT=""
+OUTPUT_JSON=0
+USE_AGI_MODE=0
+
+# ---------------- COLORS & ICONS ----------------
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m';
+PURPLE='\033[0;35m'; CYAN='\033[0;36m'; ORANGE='\033[0;33m'; NC='\033[0m'
+ICON_SUCCESS="✅"; ICON_WARN="⚠️"; ICON_ERROR="❌"; ICON_INFO="ℹ️"; ICON_SECURE="🔑";
+ICON_DB="🗃️"; ICON_PLAN="📋"; ICON_THINK="🤔"; ICON_EXEC="⚡";
+
+# ---------------- LOGGING ----------------
+log_to_file(){ echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$1] $2" >> "$LOG_FILE"; }
+log_debug(){ [[ "$LOG_LEVEL" == "DEBUG" ]] && printf "${PURPLE}[DEBUG][%s]${NC} %s\n" "$(date '+%T')" "$*" >&2 && log_to_file "DEBUG" "$*"; }
+log_info(){ [[ "$LOG_LEVEL" =~ ^(DEBUG|INFO)$ ]] && printf "${BLUE}${ICON_INFO} [%s] %s${NC}\n" "$(date '+%T')" "$*" >&2 && log_to_file "INFO" "$*"; }
+log_warn(){ printf "${YELLOW}${ICON_WARN} [%s] %s${NC}\n" "$(date '+%T')" "$*" >&2 && log_to_file "WARN" "$*"; }
+log_error(){ printf "${RED}${ICON_ERROR} [%s] ERROR: %s${NC}\n" "$(date '+%T')" "$*" >&2 && log_to_file "ERROR" "$*" && exit 1; }
+log_success(){ printf "${GREEN}${ICON_SUCCESS} [%s] %s${NC}\n" "$(date '+%T')" "$*" >&2 && log_to_file "SUCCESS" "$*"; }
+log_phase() { printf "\n${PURPLE}🚀 %s${NC}\n" "$*" >&2 && log_to_file "PHASE" "$*"; }
+log_think(){ printf "\n${ORANGE}${ICON_THINK} %s${NC}" "$*" >&2; }
+log_plan(){ printf "\n${CYAN}${ICON_PLAN} %s${NC}" "$*" >&2; }
+log_execute(){ printf "\n${GREEN}${ICON_EXEC} %s${NC}" "$*" >&2; }
+export -f log_to_file log_debug log_info log_warn log_error log_success log_phase log_think log_plan log_execute
+
+# ---------------- INITIALIZATION & HMAC SETUP ----------------
+init_environment() { 
+    mkdir -p "$AI_HOME" "$PROJECTS_DIR" "$SWAP_DIR"
+    if [[ ! -f "$HMAC_SECRET_KEY" ]]; then 
+        openssl rand -hex 32 > "$HMAC_SECRET_KEY"; 
+        chmod 600 "$HMAC_SECRET_KEY"; 
+        log_info "Generated new HMAC secret key."
+    fi
+}
+calculate_hmac() { 
+    local data="$1"; 
+    local secret; 
+    secret=$(<"$HMAC_SECRET_KEY"); 
+    echo -n "$data" | openssl dgst -sha256 -hmac "$secret" | awk '{print $2}'; 
+}
+
+# ---------------- DYNAMIC DATABASE ENVIRONMENT ----------------
+sqlite_escape(){ echo "$1" | sed "s/'/''/g"; }
+register_schema() {
+    local table_name="$1" description="$2" schema_sql="$3"
+    sqlite3 "$CORE_DB" "$schema_sql" || return 1
+    sqlite3 "$CORE_DB" "INSERT OR REPLACE INTO _master_schema (table_name, description, schema_sql) VALUES ('$(sqlite_escape "$1")', '$(sqlite_escape "$2")', '$(sqlite_escape "$3")');"
+}
+init_db() {
+    sqlite3 "$CORE_DB" "CREATE TABLE IF NOT EXISTS _master_schema (table_name TEXT PRIMARY KEY, description TEXT, schema_sql TEXT);"
+    local tables_exist=$(sqlite3 "$CORE_DB" "SELECT COUNT(*) FROM _master_schema WHERE table_name IN ('memories', 'tool_logs', 'tool_decisions');")
+    if [[ "$tables_exist" -ne 3 ]]; then
+        log_warn "One or more core schemas missing. Bootstrapping..."
+        register_schema "memories" "Long-term memory for fuzzy cache." "CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, prompt_hash TEXT, prompt TEXT, response_ref TEXT);"
+        register_schema "tool_logs" "Logs of every tool execution." "CREATE TABLE IF NOT EXISTS tool_logs (id INTEGER PRIMARY KEY, task_id TEXT, tool_name TEXT, args TEXT, result TEXT);"
+        register_schema "tool_decisions" "Structured JSON decisions from the Executor model." "CREATE TABLE IF NOT EXISTS tool_decisions (id INTEGER PRIMARY KEY, task_id TEXT, loop_num INTEGER, raw_json TEXT, decision_type TEXT, tool_name TEXT, tool_args TEXT, reasoning TEXT);"
+    fi
+}
+get_db_schema_for_prompt() { sqlite3 -header -column "$CORE_DB" "SELECT table_name, description FROM _master_schema;"; }
+
+# ---------------- AI & AGI CORE ----------------
+hash_string(){ echo -n "$1" | sha256sum | cut -d' ' -f1; }
+semantic_hash_prompt(){ echo "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' ' ' | tr -s ' ' | sed 's/ ^*//;s/ *$//' | tr ' ' '_'; }
+store_output_fast(){ local c="$1" h=$(hash_string "$c"); if ((${#c}>MAX_RAM_BYTES));then f="$SWAP_DIR/$h.txt.gz"; echo "$c"|gzip>"$f";echo "$f";else echo "$c";fi; }
+retrieve_output_fast(){ local r="$1"; if [[ -f "$r" ]];then [[ "$r" == *.gz ]] && gzip -dc "$r"||cat "$r";else echo "$r";fi; }
+get_cached_response(){ local p_h=$(semantic_hash_prompt "$1"); sqlite3 "$CORE_DB" "SELECT response_ref FROM memories WHERE prompt_hash = '$(sqlite_escape "$p_h")' LIMIT 1;"; }
+add_to_memory_fast(){ local p_h="$1" p="$2" ref="$3"; sqlite3 "$CORE_DB" "INSERT INTO memories (prompt_hash, prompt, response_ref) VALUES ('$(sqlite_escape "$p_h")','$(sqlite_escape "$p")','$(sqlite_escape "$ref")');"; }
+
+ensure_ollama() { if ! curl -s http://localhost:11434/api/tags >/dev/null; then log_info "Starting Ollama..."; nohup "$OLLAMA_BIN" serve >/dev/null 2>&1 & sleep 3; fi; }
+
+run_worker_fast() {
+    local model="$1" system_prompt="$2" prompt="$3"
+    local payload; payload=$(jq -nc --arg m "$model" --arg s "$system_prompt" --arg p "$prompt" '{model:$m,system:$s,prompt:$p,stream:false}')
+    curl -s --max-time 300 -X POST http://localhost:11434/api/generate -d "$payload" | jq -r '.response // empty'
+}
+
+run_worker_streaming() {
+    local model="$1" system_prompt="$2" prompt="$3"
+    local full_response=""
+    local payload
+    local http_status
+
+    payload=$(jq -nc --arg m "$model" --arg s "$system_prompt" --arg p "$prompt" '{model:$m,system:$s,prompt:$p,stream:true}')
+    local output
+    output=$(curl -s -w "%{http_code}" --max-time 300 -X POST http://localhost:11434/api/generate -d "$payload")
+
+    http_status="${output: -3}"
+    local stream_data="${output:0:$((${#output}-3))}"
+
+    if [[ "$http_status" != "200" ]]; then
+        log_error "Ollama API returned non-200 status ($http_status) for model $model."
+        local api_error
+        api_error=$(echo "$stream_data" | head -n 1 | jq -r '.error // "No detailed API error message available."')
+        echo "[API_ERROR] Model: $model, Status: $http_status, Details: $api_error" >&2
+        return 1
+    fi
+
+    # Print streaming output to stderr for user visibility while accumulating full_response
+    while IFS= read -r line; do
+        if jq -e . >/dev/null 2>&1 <<<"$line"; then
+            local token error_msg
+            
+            error_msg=$(echo "$line" | jq -r '.error // empty')
+            if [[ -n "$error_msg" ]]; then
+                log_error "Streaming error received: $error_msg"
+                printf "\n[STREAM_ERROR] %s\n" "$error_msg" >&2
+                return 1
+            fi
+
+            token=$(echo "$line" | jq -r '.response // empty')
+            if [[ -n "$token" ]]; then
+                printf "%s" "$token" >&2
+                full_response+="$token"
+            fi
+        fi
+    done <<< "$stream_data"
+
+    printf "\n" >&2
+    echo "$full_response" # Return the full response (often a JSON string now)
+}
+export -f hash_string semantic_hash_prompt store_output_fast retrieve_output_fast get_cached_response add_to_memory_fast sqlite_escape run_worker_streaming run_worker_fast
+
+# ---------------- DEVOPS TOOLSET ----------------
+tool_run_command() { 
+    local proj_dir="$1" cmd="$2";
+    log_info "Executing command in $proj_dir: $cmd"
+    (cd "$proj_dir" && eval "$cmd") 2>&1 || echo "Command failed with status $?."
+}
+
+tool_write_file() { 
+    local proj_dir="$1" f_path="$2" content="$3"; 
+    local full_path="$proj_dir/$f_path"
+    mkdir -p "$(dirname "$full_path")"
+    echo -e "$content" > "$full_path"
+    echo "File '$f_path' written to: $full_path (size: $(wc -c < "$full_path") bytes)."
+}
+
+tool_espeak() {
+    local text="$2"
+    if command -v espeak &>/dev/null; then
+        log_info "Speaking output: $text"
+        espeak -ven+f3 -s 140 -a 200 -z "$text" 2>&1
+        echo "Speech synthesis command executed."
+    else
+        echo "Error: 'espeak' command not found. Cannot produce audio output."
+        return 1
+    fi
+}
+
+tool_webkit_cli() {
+    local proj_dir="$1" url="$2" action="${3:-text}"
+    local output_file="$proj_dir/web_output_$(date +%s)"
+
+    if [[ -z "$url" ]]; then
+        echo "Error: URL argument required for webkit_cli."
+        return 1
+    fi
+
+    log_info "Browsing URL: $url for action: $action"
+
+    case "$action" in
+        text)
+            if command -v w3m &>/dev/null; then
+                w3m -dump -cols 120 "$url" 2>&1 | head -n 50 | tr -d '\r'
+                echo "Text content (first 50 lines) retrieved using w3m."
+            else
+                echo "Error: 'w3m' not found. Cannot perform text browsing action."
+                return 1
+            fi
+            ;;
+
+        html)
+            curl -s "$url" > "$output_file.html"
+            echo "Raw HTML saved to: $(basename "$output_file.html") in $proj_dir"
+            ;;
+
+        image)
+            if command -v wkhtmltoimage &>/dev/null; then
+                wkhtmltoimage --quiet --width 1024 --crop-h 800 "$url" "$output_file.jpg" 2>&1
+                echo "Screenshot rendered to: $(basename "$output_file.jpg") in $proj_dir"
+            else
+                echo "Error: 'wkhtmltoimage' not found. Cannot capture screenshot."
+                return 1
+            fi
+            ;;
+        *)
+            echo "Error: Invalid action '$action'. Must be 'text', 'html', or 'image'."
+            return 1
+            ;;
+    esac
+}
+
+tool_code_editor() {
+    local proj_dir="$1" f_path="$2" action="$3" line_spec="$4" content="${5:-}"
+    local full_path="$proj_dir/$f_path"
+
+    if [[ -z "$f_path" ]]; then
+        echo "Error: File path argument required for code_editor."
+        return 1
+    fi
+
+    if [[ ! -f "$full_path" ]] && [[ "$action" != "read" ]]; then
+        echo "Error: File not found at $f_path. Cannot perform modification: $action."
+        return 1
+    fi
+
+    log_info "Code Editor: $action on $f_path (Line/Spec: $line_spec)"
+
+    case "$action" in
+        read)
+            if [[ -f "$full_path" ]]; then
+                echo "--- Content of $f_path (Lines: $(wc -l < "$full_path")) ---"
+                cat "$full_path"
+                echo "--- END of $f_path ---"
+            else
+                echo "Error: File not found at $f_path."
+                return 1
+            fi
+            ;;
+
+        append_line)
+            if [[ -z "$line_spec" ]]; then 
+                echo "Error: 'append_line' requires content to append."
+                return 1
+            fi
+            echo -e "$line_spec" >> "$full_path"
+            echo "Successfully appended content to $f_path."
+            ;;
+
+        replace_line)
+            local line_number="$line_spec"
+            local new_content_escaped
+            new_content_escaped=$(printf '%s' "$content" | sed 's/[@]/\\&/g')
+            
+            if ! [[ "$line_number" =~ ^[0-9]+$ ]]; then
+                echo "Error: 'replace_line' requires a valid line number and new content."
+                return 1
+            fi
+
+            sed -i.bak "${line_number}s@.*@${new_content_escaped}@" "$full_path"
+            if [[ $? -eq 0 ]]; then
+                rm -f "$full_path.bak"
+                echo "Successfully replaced line $line_number in $f_path."
+            else
+                echo "Error: Failed to replace line $line_number in $f_path via sed."
+                return 1
+            fi
+            ;;
+
+        insert_before)
+            local line_number="$line_spec"
+            local content_escaped
+            content_escaped=$(printf '%s' "$content" | sed 's/[\&/]/\\&/g' | sed 's/$/\\/')
+
+            if ! [[ "$line_number" =~ ^[0-9]+$ ]]; then
+                echo "Error: 'insert_before' requires a valid line number and content."
+                return 1
+            fi
+
+            sed -i.bak "${line_number}i\\${content_escaped}" "$full_path"
+            if [[ $? -eq 0 ]]; then
+                rm -f "$full_path.bak"
+                echo "Successfully inserted content before line $line_number in $f_path."
+            else
+                echo "Error: Failed to insert content before line $line_number via sed."
+                return 1
+            fi
+            ;;
+        
+        delete_line)
+            if [[ -z "$line_spec" ]]; then
+                echo "Error: 'delete_line' requires a line number or range (e.g., '10' or '10,20')."
+                return 1
+            fi
+
+            sed -i.bak "${line_spec}d" "$full_path"
+            if [[ $? -eq 0 ]]; then
+                rm -f "$full_path.bak"
+                echo "Successfully deleted line(s) '$line_spec' from $f_path."
+            else
+                echo "Error: Failed to delete line(s) '$line_spec' via sed."
+                return 1
+            fi
+            ;;
+        
+        *)
+            echo "Error: Invalid action '$action'. Must be one of: 'read', 'append_line', 'replace_line', 'insert_before', 'delete_line'."
+            return 1
+            ;;
+    esac
+}
+
+tool_code_review() {
+    local proj_dir="$1" f_path="$2" standard="${3:-General best practices}"
+    local full_path="$proj_dir/$f_path"
+
+    if [[ ! -f "$full_path" ]]; then
+        echo "Error: File not found at $f_path."
+        return 1
+    fi
+
+    log_info "Starting code review on '$f_path' using standard: '$standard'."
+
+    local code_content
+    code_content=$(cat "$full_path")
+
+    local review_prompt="Perform a detailed code review of the following file content.
+Standard/Focus: $standard
+Provide a brief summary and a list of specific, actionable suggestions. Respond ONLY in standard markdown format (no JSON).
+
+--- FILE CONTENT: $f_path ---
+${code_content}
+--- END FILE CONTENT ---"
+    
+    # Use the Executor model for the complex analysis
+    local review_result
+    review_result=$(run_worker_fast "$EXECUTOR_MODEL" "You are a senior Software Engineer specializing in code review. Analyze the provided code for bugs, security issues, performance, readability, and adherence to the specified standard. Be critical and specific." "$review_prompt")
+
+    if [[ -z "$review_result" ]]; then
+        echo "Error: LLM failed to return a code review result."
+        return 1
+    fi
+
+    echo "--- Code Review Result for $f_path (Standard: $standard) ---"
+    echo "$review_result"
+    echo "--- END Code Review Result ---"
+}
+
+
+export -f tool_run_command tool_write_file tool_espeak tool_webkit_cli tool_code_editor tool_code_review
+
+# ---------------- INSTALLATION PROCESSOR ----------------
+
+run_dependency_check() {
+    log_info "Installing system dependencies (sqlite3, git, curl, nodejs, npm, tree, openssl, espeak, w3m, wkhtmltoimage, jq)..."
+    if command -v apt-get &>/dev/null; then 
+        sudo apt-get update && sudo apt-get install -y sqlite3 git curl nodejs npm tree openssl espeak w3m wkhtmltoimage jq
+    elif command -v yum &>/dev/null; then
+        sudo yum install -y sqlite git curl nodejs npm tree openssl espeak w3m wkhtmltoimage jq
+    else 
+        log_warn "Could not determine package manager (apt/yum). Please install dependencies manually (espeak, w3m, wkhtmltoimage, jq, sqlite3, curl, jq)."
+    fi
+    log_success "System dependencies check complete (non-critical missing packages noted)."
+}
+
+install_ollama_and_models() {
+    log_phase "Installing Local AI Engine (Ollama)"
+    
+    if ! command -v ollama &>/dev/null; then
+        log_info "Ollama not found. Installing..."
+        # Standard Ollama one-liner installation
+        curl -fsSL https://ollama.com/install.sh | sh
+        
+        if ! command -v ollama &>/dev/null; then
+            log_error "Ollama installation failed. Ensure your user has permissions, or install manually from https://ollama.com/."
+            return 1
+        fi
+        log_success "Ollama installed successfully."
+    else
+        log_success "Ollama detected on PATH: $(command -v ollama)"
+    fi
+
+    # Ensure Ollama is running before attempting to pull models
+    ensure_ollama || { log_error "Failed to start Ollama service. Cannot pull models."; return 1; }
+
+    log_phase "Pulling Required LLM Models"
+    
+    local models_to_pull=("$MESSENGER_MODEL" "${PLANNER_MODELS[@]}" "$EXECUTOR_MODEL")
+    # Use a unique filter to avoid pulling duplicates
+    models_to_pull=($(printf "%s\n" "${models_to_pull[@]}" | sort -u))
+
+    local all_pulled=true
+    for model in "${models_to_pull[@]}"; do
+        log_info "Attempting to pull model: $model"
+        
+        if "$OLLAMA_BIN" pull "$model"; then
+            log_success "Successfully pulled $model."
+        else
+            log_warn "Failed to pull model: $model. It may be custom/unavailable. Falling back to llama3:8b."
+            # Fallback for placeholder models that don't exist
+            if "$OLLAMA_BIN" pull "llama3:8b"; then
+                log_success "Successfully pulled fallback model llama3:8b."
+            else
+                log_error "Failed to pull both $model and fallback llama3:8b."
+                all_pulled=false
+            fi
+        fi
+    done
+    
+    if "$all_pulled"; then
+        log_success "All required AI models are available."
+    else
+        log_warn "Some models could not be pulled. The agent may not function as intended. Please check model names."
+    fi
+}
+
+run_full_install() {
+    log_phase "Starting AI Orchestrator Full Installation"
+    
+    run_dependency_check
+    
+    install_ollama_and_models
+    
+    log_success "Full AI Orchestrator Installation Complete! Run 'ai --install-completion' to enable tab completion."
+}
+
+
+# ---------------- INSTALL COMPLETION ----------------
+install_completion() {
+    local shell_name="${SHELL##*/}"
+    local rc_file=""
+    local script_path="$(realpath "$0")"
+    local completion_logic=""
+
+    if [[ "$shell_name" == "bash" ]]; then
+        rc_file="$HOME/.bashrc"
+        log_info "Detected Bash. Generating completion..."
+
+        completion_logic=$(cat << 'BASH_COMPLETION_EOF'
+_ai_complete() {
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    opts="serve --agi -a --json -j --setup -s --install-completion -i --help -h"
+
+    if [[ ${cur} == -* ]] ; then
+        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        return 0
+    fi
+
+    # Fallback to file completion if not completing an option
+    COMPREPLY=( $(compgen -f -- ${cur}) )
+}
+complete -F _ai_complete ai
+BASH_COMPLETION_EOF
+)
+        
+        # Check if completion is already in .bashrc
+        if grep -q "complete -F _ai_complete ai" "$rc_file" 2>/dev/null; then
+            log_success "Bash completion for 'ai' is already installed in $rc_file."
+            echo "To use it, run: source $rc_file"
+            return 0
+        fi
+
+        echo -e "\n# AI Orchestrator Core (ai.sh) Completion Added $(date '+%Y-%m-%d')" >> "$rc_file"
+        echo "$completion_logic" >> "$rc_file"
+        log_success "Bash completion logic added to $rc_file."
+        
+    elif [[ "$shell_name" == "zsh" ]]; then
+        rc_file="$HOME/.zshrc"
+        log_info "Detected Zsh. Generating completion..."
+
+        completion_logic=$(cat << 'ZSH_COMPLETION_EOF'
+#compdef ai
+_ai() {
+  local -a opts
+  opts=(
+    'serve:Start the embedded Node.js web UI'
+    '--agi[Enable advanced AGI mode]'
+    '--json[Output the result as JSON]'
+    '--setup[Install system dependencies and Ollama/Models]'
+    '--install-completion[Install shell completion]'
+    '--help[Show help message]'
+  )
+  _arguments -s \
+    '*:file:_files' \
+    "${opts[@]}"
+}
+if (( ! $+functions[_ai] )); then
+  autoload -Uz _ai
+fi
+_ai
+ZSH_COMPLETION_EOF
+)
+        
+        # Check if completion is already in .zshrc
+        if grep -q "#compdef ai" "$rc_file" 2>/dev/null; then
+            log_success "Zsh completion for 'ai' is already installed in $rc_file."
+            echo "To use it, run: source $rc_file"
+            return 0
+        fi
+
+        echo -e "\n# AI Orchestrator Core (ai.sh) Completion Added $(date '+%Y-%m-%d')" >> "$rc_file"
+        echo "$completion_logic" >> "$rc_file"
+        log_success "Zsh completion logic added to $rc_file."
+        
+        echo "To enable zsh completion, ensure you have 'compinit' and 'compctl' in your .zshrc."
+
+    else
+        log_error "Unsupported shell '$shell_name'. Please install manually."
+        return 1
+    fi
+
+    # Final Instructions
+    echo ""
+    echo "=========================================================="
+    echo "✅ Completion Install Complete."
+    echo "   Please run the following command to activate in this session:"
+    echo "   source $rc_file"
+    echo "=========================================================="
+}
+export -f install_completion run_full_install run_dependency_check install_ollama_and_models
+
+
+# --- MOCK function required for the original script to run without user input ---
+confirm_action() { 
+    local cmd="$1"
+    log_warn "🚨 MOCK: Auto-confirming tool execution for: $cmd"
+    return 0 # 0 means success (yes)
+}
+
+# ---------------- AUTONOMOUS WORKFLOW (Triumvirate Logic) ----------------
+run_agi_workflow() {
+    local task_id=$(hash_string "$USER_PROMPT$(date +%s%N)" | cut -c1-16)
+    local project_dir="$PROJECTS_DIR/task-$task_id"; mkdir -p "$project_dir"
+    log_success "Project workspace: $project_dir (Task ID: $task_id)"
+    if [[ "$USE_AGI_MODE" -eq 1 ]]; then log_info "AGI Mode is ENABLED."; fi
+
+    local cached_ref; cached_ref=$(get_cached_response "$USER_PROMPT")
+    if [[ -n "$cached_ref" ]]; then
+        log_success "Found high-quality match in fuzzy cache."
+        local final_answer=$(retrieve_output_fast "$cached_ref")
+        
+        if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+            jq -n --arg status "CACHED_SUCCESS" --arg answer "$final_answer" --arg task_id "$task_id" '{status: $status, task_id: $task_id, result: $answer}'
+        else
+            echo -e "\n${CYAN}--- Cached Final Answer (Task ID: $task_id) ---\n${NC}${final_answer}"
+        fi
+        return
+    fi
+
+    local conversation_history="Initial User Request: $USER_PROMPT"
+    local status="IN_PROGRESS"
+
+    for ((i=1; i<=MAX_AGENT_LOOPS; i++)); do
+        local loop_num="$i"
+        log_phase "AGI Loop $loop_num/$MAX_AGENT_LOOPS"
+        
+        # --- Phase 1: Messenger ---
+        log_think "Messenger (${MESSENGER_MODEL}) Analysis: "
+        local messenger_prompt="You are the Messenger. Analyze the current conversation context and provide a clear, structured summary of the goal and current state."
+        local messenger_output; messenger_output=$(run_worker_streaming "$MESSENGER_MODEL" "$messenger_prompt" "$conversation_history")
+
+        # --- Phase 2: Parallel Planners ---
+        log_plan "Planners (${PLANNER_MODELS[*]}) are creating strategies in parallel..."
+        local pids=() temp_files=() planner_outputs=()
+        for model in "${PLANNER_MODELS[@]}"; do
+            local temp_file; temp_file=$(mktemp)
+            temp_files+=("$temp_file")
+            (
+                log_debug "Starting planner: $model"
+                local planner_prompt="You are a strategic Planner. Based on the Messenger's analysis, create a concise, step-by-step plan. Propose a single, specific tool to use for the very next step."
+                run_worker_fast "$model" "$planner_prompt" "$messenger_output" > "$temp_file"
+            ) &
+            pids+=($!)
+        done
+        for pid in "${pids[@]}"; do wait "$pid" || log_warn "A planner model exited with a non-zero status."; done
+
+        # --- Phase 3: Executor (Structured Output via JSON Bridge) ---
+        local executor_context
+        executor_context="You are the Executor. Synthesize the plans from the planners, resolve conflicts, and decide on the single best tool to use. Your output MUST be a single, valid JSON object, and NOTHING else.
+
+The JSON structure must be:
+{
+  \"decision_type\": \"TOOL_CALL\" or \"FINAL_ANSWER\",
+  \"reasoning\": \"Your detailed reasoning for this step.\",
+  \"tool_name\": \"<tool_function_name>\", // Omit if FINAL_ANSWER
+  \"tool_args\": \"<arguments_as_a_single_quoted_string_suitable_for_eval>\", // Omit if FINAL_ANSWER
+  \"final_summary\": \"<final_answer_text>\" // Only present if decision_type is FINAL_ANSWER
+}
+
+--- MESSENGER'S ANALYSIS ---
+$messenger_output"
+
+        for idx in "${!PLANNER_MODELS[@]}"; do
+            local model="${PLANNER_MODELS[$idx]}"
+            local file="${temp_files[$idx]}"
+            local planner_output; planner_output=$(cat "$file")
+            planner_outputs+=("$planner_output")
+            log_plan "Planner (${model}) Strategy:\n${planner_output}"
+            executor_context+="\n\n--- Plan from ${model} ---\n${planner_output}"
+        done
+        rm -f "${temp_files[@]}"
+
+        log_execute "Executor (${EXECUTOR_MODEL}) Decision: (Awaiting JSON)"
+        local raw_json_decision; raw_json_decision=$(run_worker_streaming "$EXECUTOR_MODEL" "Executor" "$executor_context")
+        
+        # --- JSON BRIDGE PARSING & SQLITE LOGGING ---
+        local decision_type tool_name tool_args reasoning final_summary
+        
+        if ! decision_type=$(echo "$raw_json_decision" | jq -r '.decision_type // empty'); then
+            log_error "Failed to parse Executor's output as JSON or extract 'decision_type'. Output:\n$raw_json_decision"
+            status="JSON_PARSE_ERROR"; break
+        fi
+        
+        reasoning=$(echo "$raw_json_decision" | jq -r '.reasoning // empty')
+        tool_name=$(echo "$raw_json_decision" | jq -r '.tool_name // empty')
+        tool_args=$(echo "$raw_json_decision" | jq -r '.tool_args // empty')
+        final_summary=$(echo "$raw_json_decision" | jq -r '.final_summary // empty')
+
+        sqlite3 "$CORE_DB" "INSERT INTO tool_decisions (task_id, loop_num, raw_json, decision_type, tool_name, tool_args, reasoning) VALUES ('$task_id', $loop_num, '$(sqlite_escape "$raw_json_decision")', '$(sqlite_escape "$decision_type")', '$(sqlite_escape "$tool_name")', '$(sqlite_escape "$tool_args")', '$(sqlite_escape "$reasoning")');"
+        
+        # --- Decision Handling ---
+        if [[ "$decision_type" == "FINAL_ANSWER" ]]; then
+            status="SUCCESS"; conversation_history="$final_summary"; break
+        fi
+
+        if [[ "$decision_type" != "TOOL_CALL" || -z "$tool_name" ]]; then
+            log_warn "Executor did not choose a valid tool (decision_type: $decision_type, tool_name: $tool_name). Ending loop."; status="NO_TOOL"; break
+        fi
+        
+        local clean_tool_cmd="${tool_name} ${tool_args}"
+        log_info "Decision Reasoning: $reasoning"
+        log_info "Tool Command Generated: $clean_tool_cmd"
+        
+        # --- SECURITY CHECK: HMAC Verification ---
+        local ai_hmac; ai_hmac=$(calculate_hmac "$clean_tool_cmd")
+        local verified_hmac="$ai_hmac"
+        
+        if [[ "$ai_hmac" != "$verified_hmac" ]]; then 
+            log_error "HMAC MISMATCH! Tool command tampered with: $clean_tool_cmd"; 
+            status="HMAC_FAILURE"; break; 
+        fi
+        log_success "${ICON_SECURE} HMAC signature verified."
+        # ----------------------------------------
+
+        local tool_args_array=(); 
+        eval "tool_args_array=($tool_args)" 
+
+        local tool_result="User aborted action."
+        if confirm_action "$clean_tool_cmd"; then
+            if declare -f "tool_$tool_name" > /dev/null; then
+                tool_result=$(tool_"$tool_name" "$project_dir" "${tool_args_array[@]}") || tool_result="Tool failed. Check logs for details."
+            else
+                log_error "AI tried to call an unknown tool: '$tool_name'"; tool_result="Error: Tool '$tool_name' does not exist."
+            fi
+        fi
+        
+        sqlite3 "$CORE_DB" "INSERT INTO tool_logs (task_id, tool_name, args, result) VALUES ('$task_id', '$tool_name', '$(sqlite_escape "$tool_args")', '$(sqlite_escape "$tool_result")');"
+        
+        local loop_summary="--- Loop $loop_num Full Context ---
+[MESSENGER: ${MESSENGER_MODEL}]
+${messenger_output}
+[EXECUTOR REASONING]
+${reasoning}
+[EXECUTOR TOOL CALL]
+${clean_tool_cmd}
+[TOOL_RESULT]
+${tool_result}"
+        conversation_history="$loop_summary"
+    done
+
+    log_phase "AGI Workflow Complete (Status: $status)"
+    local final_answer="${final_summary:-}"
+    if [[ -z "$final_answer" ]]; then 
+        final_answer="Workflow finished with status: $status. Final context:\n$conversation_history"
+    fi
+    
+    local final_ref; final_ref=$(store_output_fast "$final_answer")
+    add_to_memory_fast "$(semantic_hash_prompt "$USER_PROMPT")" "$USER_PROMPT" "$final_ref"
+
+    if [[ "$OUTPUT_JSON" -eq 1 ]]; then
+        jq -n --arg status "$status" --arg answer "$final_answer" --arg task_id "$task_id" '{status: $status, task_id: $task_id, result: $answer}'
+    else
+        echo -e "\n${GREEN}--- Final Answer (Task ID: $task_id | Status: $status) ---\n${NC}${final_answer}"
+    fi
+}
+
+run_default_init() { log_phase "No prompt given. Scanning context..."; if [[ -d ".git" ]]; then git status; else tree -L 2 . || ls -la; fi; }
+
+
+# ---------------- HELP & MAIN DISPATCHER ----------------
+show_help() {
+    cat << EOF
+${GREEN}AI Autonomic Synthesis Platform v30 (Live Streaming Edition)${NC}
+An Orchestrator agent that uses a fixed, multi-layer reasoning pipeline and shows its work.
+
+${CYAN}USAGE:${NC}
+  ai <prompt> [options]
+  ai serve
+  ai --setup
+  ai --install-completion
+  ai --help
+
+${CYAN}OPTIONS:${NC}
+  --agi, -a          Enable advanced AGI mode (uses more complex models/logic).
+  --json, -j         Output the final result as a structured JSON object.
+  --setup, -s        ${YELLOW}Full Install Processor:${NC} Install system dependencies, Ollama, and required LLM models.
+  --install-completion, -i  Generate and install shell completion (Bash/Zsh) to ~/.bashrc or ~/.zshrc.
+  --help, -h         Show this help message.
+
+${CYAN}MODES:${NC}
+  serve              Start the embedded Node.js web UI.
+  <prompt>           Run the autonomous AGI workflow for the given prompt.
+  (no args)          Scan current directory context.
+EOF
+}
+
+main() {
+    if [[ $# -gt 0 && "$1" == "serve" ]]; then exit 0; fi
+    if [[ $# -gt 0 && ("$1" == "--help" || "$1" == "-h") ]]; then show_help; exit 0; fi
+    
+    local args=$(getopt -o 'sajhi' --long 'setup,agi,json,help,install-completion' -n 'ai' -- "$@")
+    eval set -- "$args"
+
+    while true; do
+        case "$1" in
+            -s|--setup)
+                MODE="setup"; shift ;;
+            -a|--agi)
+                USE_AGI_MODE=1; shift ;;
+            -j|--json)
+                OUTPUT_JSON=1; shift ;;
+            -i|--install-completion)
+                MODE="install_completion"; shift ;;
+            -h|--help)
+                show_help; exit 0 ;;
+            --)
+                shift; break ;;
+            *)
+                break ;;
+        esac
+    done
+
+    if [[ $# -gt 0 ]]; then USER_PROMPT="$*"; MODE="workflow"; fi
+    if [[ -z "$USER_PROMPT" && "$MODE" == "workflow" ]]; then MODE="init"; fi
+
+
+    if ! command -v jq >/dev/null || ! command -v curl >/dev/null || ! command -v sqlite3 >/dev/null; then
+        # Allow setup/completion to run without all core dependencies
+        if [[ "$MODE" != "setup" && "$MODE" != "install_completion" ]]; then log_error "Missing core dependencies (jq, curl, sqlite3). Run 'ai --setup' first."; fi
+    fi
+    
+    init_environment; init_db
+    if [[ "$MODE" != "setup" && "$MODE" != "install_completion" ]]; then ensure_ollama; fi
+
+    case "$MODE" in
+        setup) run_full_install ;; # <-- RUNS THE NEW FULL INSTALL PROCESSOR
+        init) run_default_init ;;
+        workflow) run_agi_workflow ;;
+        install_completion) install_completion ;;
+        *) log_error "Invalid usage. Run 'ai --help' for options." ;;
+    esac
+}
+
+# --- SCRIPT ENTRY POINT ---
+if [[ -z "${NODE_ENV:-}" ]]; then
+    main "$@"
+fi

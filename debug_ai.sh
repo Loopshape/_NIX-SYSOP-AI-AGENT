@@ -5,13 +5,13 @@ echo -e "\n🛠 Starting AI Debug Checker...\n"
 
 # === Pfade & Variablen prüfen ===
 AI_HOME="${AI_HOME:-$HOME/.local_ai_test}"
-PROJECTS_DIR="$AI_HOME/projects"
-LOG_DIR="$AI_HOME/logs"
-TMP_DIR="$AI_HOME/tmp"
-SWAP_DIR="$AI_HOME/swap"
-CORE_DB="$AI_HOME/agent_core.db"
-TASK_DB="$AI_HOME/ai_task_manager.db"
-HMAC_SECRET_KEY="$AI_HOME/secret.key"
+PROJECTS_DIR="$AI_HOME/_/.projects"
+LOG_DIR="$AI_HOME/.logs"
+TMP_DIR="$AI_HOME/.tmp"
+SWAP_DIR="$AI_HOME/.swap"
+CORE_DB="$AI_HOME/.agent_core.db"
+TASK_DB="$AI_HOME/.ai_task_manager.db"
+HMAC_SECRET_KEY="$AI_HOME/.secret.key"
 
 echo "[1] Checking directories..."
 for d in "$AI_HOME" "$PROJECTS_DIR" "$LOG_DIR" "$TMP_DIR" "$SWAP_DIR"; do
