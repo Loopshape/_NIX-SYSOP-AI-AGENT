@@ -265,9 +265,13 @@ let isSpeaking = false;
 
 // --- LLM Interaction Helpers ---
 
-function isHumanPrompt(text){
-    // Basic detection: ends with ? or contains interrogative
-    return /\?$|^who|^what|^how|^when|^where|^why|^wer|^was|^wie|^wann|^wo|^warum/i.test(text.trim());
+function isHumanPrompt(text) {
+    const t = (text || '').trim();
+    if (!t) return false;
+    // If it ends with a question mark it's a human question
+    if (t.endsWith('?')) return true;
+    // Otherwise detect common interrogative words at the start of the prompt (English + some German)
+    return /^\s*(who|what|how|when|where|why|which|whom|whose|wer|was|wie|wann|wo|warum)\b/i.test(t);
 }
 
 async function echoAnswer(promptText, answer){
