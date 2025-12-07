@@ -1,0 +1,6 @@
+{
+  "agent": "wave",
+  "type": "logic_wave",
+  "content": "Wave agent processed prompt: --verbose\ncreate a canvas solar system",
+  "tokens": []
+}

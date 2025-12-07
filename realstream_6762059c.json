@@ -1,0 +1,116 @@
+[
+  {
+    "agentId": "Nexus",
+    "hash": "7a76063f7cf61eb58149ef8d109b17c9debf254aa963e2cd150b8578ff58c8e1",
+    "entropy": 13.040473492563455,
+    "candidate": "//Nexus_0"
+  },
+  {
+    "agentId": "Echo",
+    "hash": "6abacaf210699a1336c674dfb8d0679b249ef8b3225e9061d1bfea9a5c005ae8",
+    "entropy": 13.038294118606872,
+    "candidate": "//Echo_1"
+  },
+  {
+    "agentId": "Cognito",
+    "hash": "fe32c4d87cda3785345907ffe7b49e02dfa9d6df225a7b2ec0a9089881c91ff3",
+    "entropy": 12.963041856208106,
+    "candidate": "//Cognito_0"
+  },
+  {
+    "agentId": "Cognito",
+    "hash": "421edda7f362e90083b65c172708b9601d742569879b6edbc18d5406233b1427",
+    "entropy": 12.89178844192422,
+    "candidate": "//Cognito_2"
+  },
+  {
+    "agentId": "Nexus",
+    "hash": "7a74ec0fa07e5b4e43c219ee6ecf09b73d82178b5c7b2a147960a52842b49e90",
+    "entropy": 12.837709983470258,
+    "candidate": "//Nexus_2"
+  },
+  {
+    "agentId": "Relay",
+    "hash": "6d1e454b4f65eb5242ad02f750b8093872494181163a7fcd1362100090914241",
+    "entropy": 12.724448725431722,
+    "candidate": "//Relay_1"
+  },
+  {
+    "agentId": "Nexus",
+    "hash": "d9cfab26199f49cba79b674e05e8d6465ab9ab49a3bfeb3b86e8b5106e3d0f49",
+    "entropy": 12.674871929612731,
+    "candidate": "//Nexus_1"
+  },
+  {
+    "agentId": "Echo",
+    "hash": "a76feee049dab2ee5d1b528856207f7e5d7caf7ce1bf1d9c665ffe995e0c8c4d",
+    "entropy": 12.661087424066357,
+    "candidate": "//Echo_0"
+  },
+  {
+    "agentId": "Echo",
+    "hash": "3b7ee745017941bccf9025640232f66223b7e634970d8205605d3c0c571561d9",
+    "entropy": 12.626828778508427,
+    "candidate": "//Echo_2"
+  },
+  {
+    "agentId": "Relay",
+    "hash": "b1eae80feed8061178a0173cbcece3ed08c35f17f3c6b843e21770f699079deb",
+    "entropy": 12.596237814804038,
+    "candidate": "//Relay_2"
+  },
+  {
+    "agentId": "Sentinel",
+    "hash": "eb1a045f8fd6edac98a09b5fa2d0ab63c91b7ec30a36da653c50b8aae6affb86",
+    "entropy": 12.593072947470594,
+    "candidate": "//Sentinel_2"
+  },
+  {
+    "agentId": "Cognito",
+    "hash": "d9786b4539d63b9e10c7111106b64e8537be881767a47b86589edd2d90ece319",
+    "entropy": 12.464359222322814,
+    "candidate": "//Cognito_1"
+  },
+  {
+    "agentId": "Sentinel",
+    "hash": "c41c1f3ab300d23346803c35cc943bfa048c22f4823760488544149f324bc6e2",
+    "entropy": 12.27115578771101,
+    "candidate": "//Sentinel_0"
+  },
+  {
+    "agentId": "Relay",
+    "hash": "153123080a23c5b1b857d36b7b57d30d0ab0552f73d08056857a7f05c20c2f98",
+    "entropy": 12.087152527782303,
+    "candidate": "//Relay_0"
+  },
+  {
+    "agentId": "Sentinel",
+    "hash": "aaf69c7b03c01ca89a3b0a871022987a0d693bbbf3ea7c0e9787897fa0f9079d",
+    "entropy": 12.019829117246166,
+    "candidate": "//Sentinel_1"
+  },
+  {
+    "agentId": "Nexus+Echo",
+    "hash": "63fc7fe7c6736330634c2d2d5588402e55a09d7c7728299ca9d3abf10e495ec5",
+    "entropy": 12.902191095060667,
+    "candidate": "//Nexus_0//Echo_1"
+  },
+  {
+    "agentId": "Echo+Cognito",
+    "hash": "0219e0cb08c1ea30197f892a11524ce985f3e10bbeb15c1262591806bee82004",
+    "entropy": 12.264609067967635,
+    "candidate": "//Echo_1//Cognito_0"
+  },
+  {
+    "agentId": "Cognito+Cognito",
+    "hash": "9b9648a1569b6f24a3298bedd43d22a966245db8c860b16a4c9629e1dfe4973b",
+    "entropy": 12.58314437531729,
+    "candidate": "//Cognito_0//Cognito_2"
+  },
+  {
+    "agentId": "Cognito+Nexus",
+    "hash": "c9550e396835503e4b371ed977b4fb964e8d0700800ff416235ff343312f5d06",
+    "entropy": 12.518294766054973,
+    "candidate": "//Cognito_2//Nexus_2"
+  }
+]

@@ -1,7 +1,10 @@
-fastapi
-uvicorn
-transformers
-networkx
-black
-pylint
-autopep8
+# Python dependencies for a potential backend service
+
+# Gemini API client
+google-generativeai
+
+# Web framework for creating an API
+flask
+
+# For managing environment variables
+python-dotenv

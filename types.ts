@@ -32,3 +32,10 @@ export interface ManagedReviewItem extends ReviewItem {
     userComments: string[];
 }
 
+export interface ApiResponse {
+    status: string;
+    data?: any;
+    error?: any;
+}
+
+

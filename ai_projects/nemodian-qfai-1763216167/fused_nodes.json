@@ -1,0 +1,32 @@
+[
+  {
+    "agent": "code",
+    "type": "logic_code",
+    "content": "Code agent processed prompt: --verbose\ncreate a canvas solar system",
+    "tokens": []
+  },
+  {
+    "agent": "coin",
+    "type": "logic_coin",
+    "content": "Coin agent processed prompt: --verbose\ncreate a canvas solar system",
+    "tokens": []
+  },
+  {
+    "agent": "core",
+    "type": "logic_node",
+    "content": "Python agent processed prompt: --verbose\ncreate a canvas solar system",
+    "tokens": []
+  },
+  {
+    "agent": "loop",
+    "type": "logic_node",
+    "content": "Loop agent processed prompt: --verbose\ncreate a canvas solar system",
+    "tokens": []
+  },
+  {
+    "agent": "wave",
+    "type": "logic_wave",
+    "content": "Wave agent processed prompt: --verbose\ncreate a canvas solar system",
+    "tokens": []
+  }
+]

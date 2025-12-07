@@ -1,0 +1,6 @@
+{
+  "agent": "coin",
+  "type": "logic_coin",
+  "content": "Coin agent processed prompt: --verbose\ncreate a canvas solar system",
+  "tokens": []
+}
