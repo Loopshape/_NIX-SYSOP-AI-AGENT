@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-import sqlite3, sys
+import sqlite3, sys, os
 
-DB_FILE = "$HOME/.local_ai/core.db"
+DB_FILE = os.path.expanduser("~/.local_ai/core.db")
 
 def store_code(prompt, code, language):
+    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
     cur.execute("""
@@ -21,6 +22,8 @@ def store_code(prompt, code, language):
     conn.close()
 
 def get_code(prompt):
+    if not os.path.exists(DB_FILE):
+        return None, None
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
     cur.execute("SELECT code_blob, language FROM code_cache WHERE prompt=?", (prompt,))
@@ -31,11 +34,15 @@ def get_code(prompt):
     return None, None
 
 if __name__ == "__main__":
+    if len(sys.argv) < 3:
+        print("Usage: ai_db.py {store|get} <prompt> [language] < [code]")
+        sys.exit(1)
+        
     action = sys.argv[1]
     prompt = sys.argv[2]
     if action=="store":
         code = sys.stdin.read()
-        language = sys.argv[3]
+        language = sys.argv[3] if len(sys.argv) > 3 else "text"
         store_code(prompt, code, language)
     elif action=="get":
         code, language = get_code(prompt)

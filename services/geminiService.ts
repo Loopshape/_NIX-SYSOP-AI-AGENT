@@ -1,7 +1,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ReviewItem, ReviewCategory } from "../types";
 
-const ai = new GoogleGenAI({ true });
+// Integration with NEXUS environment variables
+const API_KEY = process.env.GEMINI_API_KEY || "";
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export const reviewCode = async (code: string, focusAreas: string[]): Promise<ReviewItem[]> => {
     const focusInstruction = focusAreas.length > 0
@@ -19,39 +21,21 @@ For each issue, provide:
 Ensure your entire response is a single, valid JSON array.`;
 
     try {
-        const response = await ai.models.generateContent({
-            model: "deepseek-v3.1:671b-cloud",
-            contents: `Here is the code to review:\n\n\`\`\`\n${code}\n\`\`\``,
-            config: {
-                systemInstruction: systemPrompt,
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            category: {
-                                type: Type.STRING,
-                                enum: Object.values(ReviewCategory),
-                                description: 'The category of the review comment.'
-                            },
-                            line: {
-                                type: Type.INTEGER,
-                                nullable: true,
-                                description: 'The line number of the code issue. Null for general comments.'
-                            },
-                            comment: {
-                                type: Type.STRING,
-                                description: 'A detailed comment in GitHub-flavored markdown.'
-                            }
-                        },
-                        required: ['category', 'comment']
-                    }
-                }
-            }
+        // Fallback to Gemini Pro as standard provider
+        const modelName = "gemini-1.5-pro"; 
+        const response = await ai.getGenerativeModel({ model: modelName }).generateContent({
+            contents: [{ role: 'user', parts: [{ text: `Here is the code to review:\n\n\
+```\
+${code}
+\
+```\n` }] }],
+            generationConfig: {
+                responseMimeType: "application/json"
+            },
+            systemInstruction: systemPrompt
         });
         
-        const jsonString = response.text.trim();
+        const jsonString = response.response.text().trim();
         const reviewData = JSON.parse(jsonString);
 
         if (!Array.isArray(reviewData)) {
@@ -62,9 +46,6 @@ Ensure your entire response is a single, valid JSON array.`;
 
     } catch (error) {
         console.error("Error calling Gemini API:", error);
-        if (error instanceof Error) {
-            throw new Error(`AI Core Error: ${error.message}`);
-        }
-        throw new Error("An unknown error occurred while communicating with the AI Core.");
+        throw new Error(error instanceof Error ? `AI Core Error: ${error.message}` : "Unknown error.");
     }
 };

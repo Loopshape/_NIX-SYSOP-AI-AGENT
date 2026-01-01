@@ -63,6 +63,6 @@ def process_data():
         return jsonify({"error": "An internal server error occurred."}), 500
 
 if __name__ == '__main__':
-    # Run the server on http://127.0.0.1:11434/
-    print("Starting Flask AI Server on http://127.0.0.1:11434/")
-    app.run(debug=True, port=11434)
+    # Run the server on http://127.0.0.1:11435/
+    print("Starting Flask AI Server on http://127.0.0.1:11435/")
+    app.run(debug=True, port=11435)

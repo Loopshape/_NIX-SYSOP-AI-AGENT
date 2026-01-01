@@ -25,12 +25,19 @@ EOF
 
 multi_brain_process(){
   local prompt="$1"
-  local output="$prompt"
-  for m in "${MODELS[@]}"; do
-    output=$(echo "$output" | jq -R --arg m "$m" '{"model":$m,"input":.,"output":"\(.input) processed by \($m)"}')
-    [[ "$output" == *"[FINAL_ANSWER]"* ]] && break
-  done
-  echo "$output"
+  local ai_bridge="$HOME/_/ai/ai.sh"
+  
+  if [ -x "$ai_bridge" ]; then
+    echo "⚡ Routing to NEXUS CORE..."
+    "$ai_bridge" query CORE "$prompt"
+  else
+    local output="$prompt"
+    for m in "${MODELS[@]}"; do
+      output=$(echo "$output" | jq -R --arg m "$m" '{"model":$m,"input":.,"output":"\(.input) processed by \($m)"}')
+      [[ "$output" == *"[FINAL_ANSWER]"* ]] && break
+    done
+    echo "$output"
+  fi
 }
 
 ai_help(){

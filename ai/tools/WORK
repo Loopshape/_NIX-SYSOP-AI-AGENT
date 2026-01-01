@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Tool for interacting with the WORK agent
+
+PROMPT=""
+if [ -z "" ]; then
+    echo "Usage: $0 <prompt>"
+    exit 1
+fi
+
+MODEL="deepseek-v3.1:671b-cloud"
+
+curl -s -X POST http://127.0.0.1:11434/api/generate -d "{
+    \"model\": \"\",
+    \"prompt\": \"\" 
+}"

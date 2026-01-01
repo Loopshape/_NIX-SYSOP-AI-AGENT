@@ -4,7 +4,7 @@
 AI_HOME="${AI_HOME:-$PWD/.ai_sandbox}"
 DB_PATH="${DB_PATH:-$PWD/core.db}"
 SESSION_ID=$(uuidgen 2>/dev/null||echo $RANDOM$RANDOM)
-MODELS=("code" "coin" "2244" "core" "loop")
+MODELS=("code" "coin" "wave" "core" "loop")
 API_URL="${API_URL:-http://localhost:11434}"
 
 ENTROPY_THRESHOLD="${ENTROPY_THRESHOLD:-0.5}"

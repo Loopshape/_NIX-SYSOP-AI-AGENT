@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Tool for interacting with the WAVE agent
+
+PROMPT=""
+if [ -z "" ]; then
+    echo "Usage: $0 <prompt>"
+    exit 1
+fi
+
+MODEL="qwen3-vl:2b"
+
+curl -s -X POST http://127.0.0.1:11434/api/generate -d "{
+    \"model\": \"\",
+    \"prompt\": \"\" 
+}"

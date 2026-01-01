@@ -5,9 +5,9 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-AI_HOME="$HOME/.local_ai"
-AI_BIN="$HOME/.bin/ai"
-LOGS="$HOME/logs"
+AI_HOME="$HOME/_/ai"
+AI_BIN="$AI_HOME/ai.sh"
+LOGS="$AI_HOME/logs"
 
 mkdir -p "$LOGS"
 
