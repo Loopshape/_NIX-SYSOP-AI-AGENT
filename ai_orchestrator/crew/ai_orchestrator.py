@@ -1,4 +1,3 @@
-OLLAMA="/home/linuxbrew/.linuxbrew/bin/ollama"  # absolute path injected by install_loop.sh
 #!/usr/bin/env python3
 import subprocess, hashlib, json, sys, time, concurrent.futures
 
