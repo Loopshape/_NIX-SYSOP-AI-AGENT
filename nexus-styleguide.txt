@@ -1,0 +1,287 @@
+NEXUS AI Styleguide v1.0
+
+Purpose: Ensure all visual and interactive elements of NEXUS-AI are consistent, recognizable, and functional, supporting multi-agent intelligence, DOM analysis, memory visualization, and cross-session orchestration.
+
+1. Brand Identity
+
+Logo:
+NEXUS in monospaced, technical font with glowing accent edges.
+
+Primary Logo: Gradient neon (Green → Blue → Violet) for dynamic contexts.
+
+Iconography: Simplified network node for compact usage.
+
+Typography:
+
+Primary: 'Courier New', monospace (for dashboard, coding contexts)
+
+Secondary: 'Roboto', sans-serif (for text-heavy instructions, tooltips)
+
+Headings: Bold, neon accents
+
+Body: Regular weight, subtle glow effects
+
+Tone: Technical, futuristic, transparent, collaborative.
+
+2. Color Palette
+Purpose	HEX	Usage
+Neon Green	#00FF00	Active nodes, highlights, agent selection
+Neon Blue	#00BFFF	Memory graph, timelines, links
+Neon Violet	#8A2BE2	Branches, secondary focus areas
+Neon Red	#FF4500	Warnings, errors, halted agents
+Dark Background	#0B0F14	Canvas, panels, dashboards
+Panel Gray	#151A22	Secondary container backgrounds
+Transparent Glass	rgba(0,0,0,0.2)	Overlay effects
+
+Use high contrast for readability on large dashboards and 3D visualizations.
+
+All heatmap overlays should follow green → yellow → red gradient for intensity.
+
+3. Layout & Grid System
+
+Dashboard Grid:
+
+3 columns: Agent Pool | Main Graph | Control Panel
+
+3 rows: Header | Main Content | Status / Timeline
+
+Gap: 1–2px with neon accent borders
+
+Panels & Containers:
+
+Rounded corners (border-radius: 12px)
+
+Soft glow for focus (box-shadow: 0 0 12px rgba(0,255,0,0.5))
+
+Overflow scroll for memory logs and agent lists
+
+Responsiveness:
+
+Collapsible side panels for smaller viewports
+
+Canvas scaling for Three.js 3D graphs
+
+4. UI Components
+4.1 Buttons
+
+Shape: Rounded rectangle, neon accent border
+
+Active: Glow intensity increase, slight scale-up (transform: scale(1.05))
+
+Disabled: Reduced opacity (0.4)
+
+4.2 Inputs
+
+Transparent background (#111)
+
+Neon borders (#0f0)
+
+Monospaced font for prompt entry
+
+Auto-resize for dynamic content
+
+4.3 Dropdowns / Selects
+
+Dark panel background
+
+Neon hover highlight
+
+Multi-agent selection supports checkboxes for personality modes
+
+4.4 Panels
+
+Agent Pool: Vertical stack with agent avatars, voting score, entropy indicator
+
+Control Panel: Command buttons, sliders (entropy, temperature), system prompts
+
+Memory Panel: Timeline scrubber, branch selection, 3D graph view
+
+Status Bar: Realtime entropy, memory usage, active agents
+
+5. 3D Visualization (Three.js)
+
+Memory Graph Nodes:
+
+Shape: Sphere or cube
+
+Color: Neon gradient by type (prompt, response, agent, system)
+
+Size: Relative to importance/entropy
+
+Glow on hover
+
+Edges / Connections:
+
+Curved lines for dependencies
+
+Opacity by age or relevance
+
+Animated pulse for active updates
+
+Camera Controls:
+
+Orbit, zoom, pan
+
+Node click triggers inspection panel with DOM diff, memory snapshot, branch info
+
+Branching & Replay:
+
+Collapsible 3D tree
+
+Replay timeline scrubbing with animated node highlight
+
+6. Heatmap Overlay
+
+Purpose: Show AI focus on live web pages
+
+Gradient: Green → Yellow → Red (low → high AI attention)
+
+Opacity: Semi-transparent, allow user interaction
+
+Dynamic Updates: Highlight DOM changes caused by agent decisions
+
+7. Timeline & Memory Navigation
+
+Timeline Scrubber: Horizontal slider with branch markers
+
+Memory Nodes: Hover → show details panel
+
+Branch Replay: Step-through historical states with DOM diff visualization
+
+8. Multi-Agent Interaction
+
+Voting Panel:
+
+Each agent displays vote weight (0–100%)
+
+Color-coded bars by agent personality
+
+Hover shows agent focus description and entropy contribution
+
+Personality Modes:
+
+CORE, CUBE, LOOP, SIGN, LINE, COIN, WORK, CODE
+
+Agent personalities persist across sessions
+
+Consensus Algorithm:
+
+Weighted by shifted entropy (2π / 8)
+
+Fractal rehash ensures coherent combined outputs
+
+9. DOM & Code Inspection
+
+Node Inspection: Click node → shows full DOM attributes, innerHTML, CSS diff
+
+DOM Diff Visualization:
+
+Added nodes: Green
+
+Modified nodes: Yellow
+
+Removed nodes: Red
+
+Inline DOM Overlay: Semi-transparent panel above live page for direct analysis
+
+10. Export & Persistence
+
+Memory Export:
+
+JSON or SQLite
+
+Includes hashes, timestamps, branch, agent votes, and DOM snapshot
+
+Cross-Session Persistence:
+
+Stores memory, agent states, and personalities
+
+Allows audit and branch replay
+
+11. Animation & Effects
+
+GSAP-driven animations: Smooth transitions for nodes, heatmaps, panels
+
+Hover Effects: Glow, scale, entropy ripple
+
+Branch Replay: Node pulses in sequence to indicate evolution
+
+Timeline Scrubber: Animated scrubber handle, highlight path
+
+12. Sound & Alerts (Optional)
+
+Soft notifications for agent decisions
+
+Warning chimes for system anomalies or halted agents
+
+13. Accessibility
+
+Color-blind friendly heatmaps (alternative color sets)
+
+ARIA labels for dynamic panels and memory entries
+
+Keyboard shortcuts:
+
+CTRL+ALT+ENTER → Open dashboard
+
+Arrow keys → Timeline navigation
+
+Tab → Switch between panels
+
+14. Developer Guidelines
+
+Component Naming: nexus-* for CSS classes
+
+Canvas & DOM Layering: Canvas for 3D, overlay divs for interaction
+
+Entropy Calculation: Every prompt/action anchored to genesis hash
+
+Agent Expansion: New personalities must follow 2π/8 entropy modulation
+
+Versioning: Maintain semantic versioning (v8.0.x) for scripts & dashboards
+
+15. File & Integration Structure
+/nexus
+│
+├─ /js
+│   ├─ app.js          # Core bridge logic
+│   ├─ dashboard.js    # UI & 3D visualization
+│
+├─ /css
+│   └─ nexus.css       # Panels, glow, typography
+│
+├─ /assets
+│   ├─ icons/          # Agent icons & node images
+│   └─ shaders/        # Three.js visual effects
+│
+├─ /data
+│   └─ memory.sqlite   # Persistent memory
+│
+├─ /tampermonkey
+│   └─ nexus.user.js   # DOM capture & bridge
+
+16. Summary of Features
+
+Live 3D memory visualization (Three.js)
+
+DOM diff & node inspection for every change
+
+Timeline & branch replay with scrubbing
+
+Heatmap overlays for live page AI focus
+
+Multi-agent voting & personality modes
+
+Entropy-modulated decision making (2π/8)
+
+Autonomous refactoring & self-training
+
+Cross-page orchestration & repository analysis
+
+Memory export to JSON/SQLite
+
+Interactive dashboard for humans
+
+Full auditability and replayable cognition
+
+This styleguide serves as the definitive reference for implementing, visualizing, and interacting with NEXUS-AI. It ensures consistency across dashboard UIs, web overlays, memory graphs, agent interactions, and visualization pipelines.

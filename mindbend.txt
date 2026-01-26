@@ -1,0 +1,4 @@
+- Lateral Thinking: Enabled
+- Quantum Probability: Simulated
+- Entropy: High-Variance
+- Creativity: Unbounded

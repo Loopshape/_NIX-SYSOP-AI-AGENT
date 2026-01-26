@@ -1,840 +1,274 @@
 // ==UserScript==
-// @name         NEXUS 2244-1 Daemon v8.1 Enhanced
-// @namespace    https://github.com/Loopshape
-// @version      8.1
-// @description  WSL1-Ollama-Nexus Bridge: Hyperthreaded AI coherence with SHA256/MD5 entropy sorting, fractal agent boost, and bidirectional DOM synchronization
-// @author       Loopshape & Nexus AI Collective
-// @homepage     https://github.com/Loopshape
+// @name         NEXUS-2244-ULTIMATE
+// @namespace    http://nexus.local
+// @version      2244.1
+// @description  NEXUS-2244: Visual Cognitive Engine, DOM-Aware, Time-Traveling AI
 // @match        *://*/*
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
-// @grant        GM_xmlhttpRequest
-// @grant        unsafeWindow
 // @grant        GM_download
-// @grant        GM_getValue
 // @grant        GM_setValue
-// @grant        GM_deleteValue
-// @grant        GM_listValues
-// @grant        GM_registerMenuCommand
+// @grant        GM_getValue
 // @connect      localhost
-// @connect      127.0.0.1
-// @connect      127.0.1.1
-// @connect      wsl.localhost
-// @require      https://code.jquery.com/jquery-3.7.1.min.js
-// @require      https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js
-// @require      https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js
-// @run-at       document-end
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    // Constants for your specific WSL1-Ollama-Nexus setup
-    const CONFIG = {
-        OLLAMA_HOST: 'http://localhost:11434',
-        OLLAMA_WSL_PATH: '/home/loop/_/ai/ai.sh',
-        NEXUS_API: 'http://localhost:3000', // Assuming Nexus AIP runs on port 3000 in WSL1
-        GITHUB_PROFILE: 'https://api.github.com/users/Loopshape/repos',
-        AGENT_POOL: ["CORE", "CUBE", "LOOP", "SIGN", "LINE", "COIN", "WORK", "CODE"],
-        ENTROPY_MODULUS: Math.PI * 2 / 8, // 2Pi/8 models shifted entropy
-        REQUEST_TIMEOUT: 30000,
-        MEMORY_CHUNK_SIZE: 16384,
-        MAX_TOKENS: 4096
-    };
+    const API = "http://localhost:3000";
+    let lastDOMTree = [];
 
-    // Enhanced entropy system with SHA256/MD5 fractal rehashing
-    class EntropyManager {
-        constructor() {
-            this.entropyBuffer = new Float64Array(256);
-            this.entropyIndex = 0;
-            this.qbitStates = new Map(); // For quantum-like entropy states
-            this.initEntropyBuffer();
-        }
+    // --- DOM ENGINE ---
 
-        async initEntropyBuffer() {
-            // Initialize with cryptographically secure pseudo-random values
-            for (let i = 0; i < this.entropyBuffer.length; i++) {
-                this.entropyBuffer[i] = Math.random();
-            }
-        }
-
-        async sha256(data) {
-            const encoder = new TextEncoder();
-            const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(data));
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        }
-
-        async md5ChunkHash(data) {
-            // Simple MD5-like hash for chunking (non-crypto, for ordering only)
-            let hash = 0;
-            for (let i = 0; i < data.length; i++) {
-                hash = ((hash << 5) - hash) + data.charCodeAt(i);
-                hash |= 0; // Convert to 32bit integer
-            }
-            return (hash >>> 0).toString(16); // Unsigned
-        }
-
-        async fractalRehash(baseHash, iterations = 3) {
-            let currentHash = baseHash;
-            for (let i = 0; i < iterations; i++) {
-                const entropy = this.entropyBuffer[(this.entropyIndex++) % this.entropyBuffer.length];
-                const shift = Math.floor(entropy * 256);
-                const rotated = currentHash.substring(shift) + currentHash.substring(0, shift);
-                currentHash = await this.sha256(rotated + entropy.toString());
-
-                // Qbit-like superposition of entropy states
-                this.qbitStates.set(`iteration_${i}`, {
-                    hash: currentHash,
-                    entropy: entropy,
-                    timestamp: Date.now()
-                });
-            }
-            return currentHash;
-        }
-
-        getShiftedEntropy(index) {
-            const baseEntropy = this.entropyBuffer[index % this.entropyBuffer.length];
-            const shift = (index * CONFIG.ENTROPY_MODULUS) % 1;
-            return (baseEntropy + shift) % 1;
-        }
-
-        async generateGenesisHash(prompt, context) {
-            const combined = prompt + JSON.stringify(context) + Date.now().toString();
-            const sha256Hash = await this.sha256(combined);
-            const md5Chunk = await this.md5ChunkHash(combined.substring(0, 1024));
-            const fractalHash = await this.fractalRehash(sha256Hash);
-
-            return {
-                sha256: sha256Hash,
-                md5Chunks: md5Chunk,
-                fractal: fractalHash,
-                genesis: await this.sha256(sha256Hash + md5Chunk + fractalHash),
-                timestamp: Date.now(),
-                entropy: this.getShiftedEntropy(Date.now() % 256)
-            };
-        }
-    }
-
-    // Bidirectional communication bridge between Chrome and WSL1
-    class WSLBridge {
-        constructor() {
-            this.entropyManager = new EntropyManager();
-            this.activeConnections = new Map();
-            this.messageQueue = [];
-            this.isProcessing = false;
-            this.pinnedRepos = null;
-        }
-
-        async init() {
-            await this.loadPinnedRepos();
-            this.setupHotkey();
-            this.setupMessageHandlers();
-            return this;
-        }
-
-        async loadPinnedRepos() {
-            try {
-                const response = await fetch(CONFIG.GITHUB_PROFILE);
-                const repos = await response.json();
-                this.pinnedRepos = repos.filter(repo => repo.topics && repo.topics.includes('pinned'))
-                    .map(repo => ({
-                        name: repo.name,
-                        description: repo.description,
-                        url: repo.html_url,
-                        language: repo.language,
-                        stars: repo.stargazers_count
-                    }));
-                console.log('Loaded pinned repos:', this.pinnedRepos.length);
-            } catch (error) {
-                console.warn('Could not load pinned repos:', error);
-                this.pinnedRepos = [];
-            }
-        }
-
-        setupHotkey() {
-            document.addEventListener('keydown', (e) => {
-                if (e.ctrlKey && e.altKey && e.key === 'Enter') {
-                    e.preventDefault();
-                    this.openNexusDashboard();
-                }
+    function captureDOMTree() {
+        function walk(node, path = "0") {
+            let out = [];
+            if (!node || !node.tagName) return out;
+            const id = node.id || "";
+            const cls = node.className || "";
+            const sig = node.tagName + "#" + id + "." + cls;
+            out.push({ path, sig, rect: node.getBoundingClientRect() });
+            Array.from(node.children).forEach((child, i) => {
+                out.push(...walk(child, path + "." + i));
             });
+            return out;
         }
-
-        async openNexusDashboard() {
-            // Create a new tab with the Nexus Dashboard
-            const dashboardURL = chrome.runtime.getURL('nexus-dashboard.html') ||
-                `data:text/html,${encodeURIComponent(this.generateDashboardHTML())}`;
-
-            window.open(dashboardURL, '_blank');
-        }
-
-        generateDashboardHTML() {
-            return `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>NEXUS AI Platform Dashboard</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Courier New', monospace;
-            background: linear-gradient(135deg, #0b0f14 0%, #1a1f29 100%);
-            color: #0f0;
-            height: 100vh;
-            overflow: hidden;
-        }
-        .dashboard {
-            display: grid;
-            grid-template-columns: 300px 1fr 300px;
-            grid-template-rows: 60px 1fr 200px;
-            height: 100vh;
-            gap: 1px;
-            background: #0a0;
-        }
-        .header {
-            grid-column: 1 / -1;
-            background: #111;
-            display: flex;
-            align-items: center;
-            padding: 0 20px;
-            border-bottom: 2px solid #0f0;
-        }
-        .agent-panel {
-            background: #151a22;
-            padding: 15px;
-            overflow-y: auto;
-        }
-        .main-view {
-            display: grid;
-            grid-template-rows: 1fr 300px;
-            gap: 1px;
-        }
-        .graph-container {
-            background: #0f1219;
-            position: relative;
-        }
-        .memory-log {
-            background: #151a22;
-            padding: 10px;
-            overflow-y: auto;
-        }
-        .control-panel {
-            background: #151a22;
-            padding: 15px;
-        }
-        .status-bar {
-            grid-column: 1 / -1;
-            background: #111;
-            display: flex;
-            align-items: center;
-            padding: 0 20px;
-            border-top: 2px solid #0f0;
-        }
-        canvas {
-            width: 100%;
-            height: 100%;
-        }
-        .log-entry {
-            border-left: 3px solid #0f0;
-            padding: 5px 10px;
-            margin: 5px 0;
-            background: rgba(0, 255, 0, 0.05);
-        }
-        .agent {
-            padding: 8px;
-            margin: 5px 0;
-            background: rgba(0, 255, 0, 0.1);
-            border: 1px solid #0f0;
-            cursor: pointer;
-        }
-        button {
-            background: #0f0;
-            color: #000;
-            border: none;
-            padding: 8px 15px;
-            margin: 5px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        button:hover {
-            background: #0a0;
-        }
-        input, select {
-            background: #111;
-            color: #0f0;
-            border: 1px solid #0f0;
-            padding: 8px;
-            margin: 5px;
-            width: calc(100% - 20px);
-        }
-    </style>
-</head>
-<body>
-    <div class="dashboard">
-        <div class="header">
-            <h1>NEXUS AIP v8.0</h1>
-            <div style="margin-left: auto;">
-                <span id="connection-status">🟢 WSL1 Connected</span>
-            </div>
-        </div>
-
-        <div class="agent-panel">
-            <h3>Agent Pool (2π/8 Shifted)</h3>
-            <div id="agents-list"></div>
-        </div>
-
-        <div class="main-view">
-            <div class="graph-container">
-                <canvas id="nexus-graph"></canvas>
-            </div>
-            <div class="memory-log">
-                <h3>Memory Timeline</h3>
-                <div id="memory-entries"></div>
-            </div>
-        </div>
-
-        <div class="control-panel">
-            <h3>Control Center</h3>
-            <input type="text" id="prompt-input" placeholder="Enter prompt for NEXUS...">
-            <button id="send-prompt">Send</button>
-            <select id="model-select">
-                <option value="llama2">Llama 2</option>
-                <option value="mistral">Mistral</option>
-                <option value="codellama">Code Llama</option>
-            </select>
-            <button id="sync-dom">Sync Current DOM</button>
-            <button id="export-memory">Export Memory</button>
-            <button id="entropy-reset">Reset Entropy</button>
-        </div>
-
-        <div class="status-bar">
-            <span id="entropy-display">Entropy: 0.000</span>
-            <span id="memory-usage" style="margin-left: 20px;">Memory: 0/16384 chunks</span>
-            <span id="active-agents" style="margin-left: 20px;">Active Agents: 0/8</span>
-        </div>
-    </div>
-
-    <script>
-        // Dashboard JavaScript will be injected here
-        ${this.getDashboardScript()}
-    </script>
-</body>
-</html>`;
-        }
-
-        getDashboardScript() {
-            return `
-// Dashboard functionality
-class NexusDashboard {
-    constructor() {
-        this.scene = null;
-        this.camera = null;
-        this.renderer = null;
-        this.nodes = [];
-        this.edges = [];
-        this.initThreeJS();
-        this.bindEvents();
-        this.updateStatus();
+        return walk(document.body);
     }
 
-    initThreeJS() {
-        const canvas = document.getElementById('nexus-graph');
-        this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
-        this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-        this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-        this.renderer.setClearColor(0x0b0f14, 1);
+    function diffDOMTrees(before, after) {
+        const mapA = new Map(before.map(n => [n.path, n.sig]));
+        const mapB = new Map(after.map(n => [n.path, n.sig]));
+        const changes = [];
 
-        // Add lights
-        const ambientLight = new THREE.AmbientLight(0x404040);
-        this.scene.add(ambientLight);
-        const directionalLight = new THREE.DirectionalLight(0x00ff00, 0.5);
-        directionalLight.position.set(1, 1, 1);
-        this.scene.add(directionalLight);
-
-        this.camera.position.z = 15;
-        this.animate();
+        for (const [path, sig] of mapB.entries()) {
+            if (!mapA.has(path)) {
+                changes.push({ path, type: "added", sig });
+            } else if (mapA.get(path) !== sig) {
+                changes.push({ path, type: "modified", from: mapA.get(path), to: sig });
+            }
+        }
+        for (const [path, sig] of mapA.entries()) {
+            if (!mapB.has(path)) {
+                changes.push({ path, type: "removed", sig });
+            }
+        }
+        return changes;
     }
 
-    animate() {
-        requestAnimationFrame(() => this.animate());
-        // Rotate nodes for visualization
-        this.nodes.forEach((node, i) => {
-            node.rotation.x += 0.01;
-            node.rotation.y += 0.01;
-        });
-        this.renderer.render(this.scene, this.camera);
+    function getNodeByPath(path) {
+        try {
+            let node = document.body;
+            path.split(".").slice(1).forEach(i => {
+                if(node && node.children) node = node.children[parseInt(i)];
+            });
+            return node;
+        } catch { return null; }
     }
 
-    bindEvents() {
-        document.getElementById('send-prompt').addEventListener('click', () => {
-            const prompt = document.getElementById('prompt-input').value;
-            window.opener.postMessage({
-                type: 'NEXUS_PROMPT',
-                prompt: prompt,
-                model: document.getElementById('model-select').value
-            }, '*');
+    function renderDOMHeatmap(domDiff) {
+        let layer = document.getElementById("nexus-heatmap");
+        if (!layer) {
+            layer = document.createElement("div");
+            layer.id = "nexus-heatmap";
+            Object.assign(layer.style, {
+                position: "fixed", left: "0", top: "0", width: "100vw", height: "100vh",
+                pointerEvents: "none", zIndex: "999999", mixBlendMode: "screen"
+            });
+            document.body.appendChild(layer);
+        }
+        layer.innerHTML = "";
+
+        domDiff.forEach(change => {
+            const el = getNodeByPath(change.path);
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            const box = document.createElement("div");
+            let color = "rgba(255,255,0,0.3)"; // Modified
+            if (change.type === "added") color = "rgba(0,255,0,0.4)";
+            if (change.type === "removed") color = "rgba(0,0,255,0.4)";
+
+            Object.assign(box.style, {
+                position: "absolute",
+                left: rect.left + "px", top: rect.top + "px",
+                width: rect.width + "px", height: rect.height + "px",
+                background: color, border: "1px solid rgba(255,255,255,0.5)",
+                borderRadius: "4px", animation: "nexus-pulse 2s infinite"
+            });
+            layer.appendChild(box);
         });
     }
 
-    updateStatus() {
-        // Update status indicators
-        setInterval(() => {
-            document.getElementById('entropy-display').textContent =
-                'Entropy: ' + Math.random().toFixed(3);
-        }, 1000);
+    GM_addStyle(`@keyframes nexus-pulse { 0% { opacity: 0.2; } 50% { opacity: 0.8; } 100% { opacity: 0.2; } }`);
+
+    // --- UI DASHBOARD ---
+
+    function createUI() {
+        if(document.getElementById("nexus-ui")) return;
+        const div = document.createElement("div");
+        div.id = "nexus-ui";
+        Object.assign(div.style, {
+            position: "fixed", bottom: "10px", right: "10px", width: "400px", height: "500px",
+            background: "#000", border: "1px solid #0f0", color: "#0f0", fontFamily: "monospace",
+            zIndex: "1000000", display: "flex", flexDirection: "column", opacity: "0.9"
+        });
+        
+        div.innerHTML = `
+            <div style="padding:5px; border-bottom:1px solid #0f0; display:flex; justify-content:space-between;">
+                <b>NEXUS-2244</b> <span id="nexus-status">Idle</span> <button id="nexus-close">x</button>
+            </div>
+            <div id="nexus-graph" style="flex:1; background:#050505; position:relative;"></div>
+            <div style="padding:5px; height:100px; overflow:auto; border-top:1px solid #0f0;" id="nexus-log"></div>
+            <div style="padding:5px; display:flex;">
+                <input id="nexus-input" type="text" style="flex:1; background:#111; color:#0f0; border:1px solid #0f0;" placeholder="Command NEXUS...">
+                <button id="nexus-send">Send</button>
+            </div>
+            <div style="padding:5px; display:flex; justify-content:space-between;">
+                 <button id="nexus-replay">Replay</button>
+                 <button id="nexus-export">Export DB</button>
+                 <button id="nexus-goals">Goals</button>
+            </div>
+        `;
+        document.body.appendChild(div);
+
+        document.getElementById("nexus-close").onclick = () => div.style.display = "none";
+        document.getElementById("nexus-send").onclick = sendPrompt;
+        document.getElementById("nexus-input").onkeydown = (e) => { if(e.key==="Enter") sendPrompt(); };
+        document.getElementById("nexus-export").onclick = () => window.open(API+"/export");
+        document.getElementById("nexus-replay").onclick = replayTimeline;
+
+        initThreeJS(document.getElementById("nexus-graph"));
     }
-}
 
-// Initialize dashboard when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-    window.nexusDashboard = new NexusDashboard();
-});`;
-        }
-
-        setupMessageHandlers() {
-            // Handle messages from dashboard
-            window.addEventListener('message', (event) => {
-                if (event.data.type === 'NEXUS_PROMPT') {
-                    this.processPrompt(event.data.prompt, event.data.model);
-                }
-            });
-        }
-
-        async captureFullDOM() {
-            return {
-                html: document.documentElement.outerHTML,
-                css: Array.from(document.styleSheets)
-                    .map(sheet => {
-                        try {
-                            return Array.from(sheet.cssRules || [])
-                                .map(rule => rule.cssText)
-                                .join('\\n');
-                        } catch (e) {
-                            return '';
-                        }
-                    })
-                    .join('\\n'),
-                scripts: Array.from(document.scripts)
-                    .map(script => script.outerHTML)
-                    .join('\\n'),
-                url: window.location.href,
-                title: document.title,
-                timestamp: Date.now(),
-                windowSize: {
-                    width: window.innerWidth,
-                    height: window.innerHeight
-                }
-            };
-        }
-
-        async callWSLScript(command, args = []) {
-            return new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: CONFIG.OLLAMA_HOST + '/api/generate',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    data: JSON.stringify({
-                        model: 'llama2',
-                        prompt: command,
-                        stream: false
-                    }),
-                    timeout: CONFIG.REQUEST_TIMEOUT,
-                    onload: (response) => {
-                        try {
-                            const data = JSON.parse(response.responseText);
-                            resolve(data.response || data);
-                        } catch (e) {
-                            resolve(response.responseText);
-                        }
-                    },
-                    onerror: reject,
-                    ontimeout: reject
-                });
-            });
-        }
-
-        async processPrompt(prompt, model = 'llama2') {
-            try {
-                // Capture current DOM state
-                const domState = await this.captureFullDOM();
-                const genesisHash = await this.entropyManager.generateGenesisHash(prompt, {
-                    dom: domState.html.substring(0, 10000),
-                    url: domState.url,
-                    timestamp: domState.timestamp
-                });
-
-                // Prepare context with pinned repos
-                const context = {
-                    userPrompt: prompt,
-                    domSnapshot: domState,
-                    genesisHash: genesisHash,
-                    pinnedRepos: this.pinnedRepos,
-                    currentPage: {
-                        url: window.location.href,
-                        title: document.title
-                    },
-                    systemState: {
-                        entropy: genesisHash.entropy,
-                        timestamp: Date.now(),
-                        agentCount: CONFIG.AGENT_POOL.length
-                    }
-                };
-
-                // Concurrent tokenized thinking across agent pool
-                const agentPromises = CONFIG.AGENT_POOL.map(async (agent) => {
-                    const agentEntropy = this.entropyManager.getShiftedEntropy(
-                        CONFIG.AGENT_POOL.indexOf(agent)
-                    );
-
-                    const agentPrompt = `[AGENT:${agent}] [ENTROPY:${agentEntropy.toFixed(6)}]
-[GENESIS_HASH:${genesisHash.genesis}]
-[CONTEXT:${JSON.stringify(context)}]
-[USER_PROMPT:${prompt}]
-
-Generate response considering your specialized role as ${agent} with entropy shift ${agentEntropy}.
-Focus on: ${this.getAgentFocus(agent)}`;
-
-                    return this.callWSLScript(agentPrompt);
-                });
-
-                // Wait for all agents with timeout
-                const results = await Promise.allSettled(
-                    agentPromises.map(p =>
-                        Promise.race([
-                            p,
-                            new Promise(resolve =>
-                                setTimeout(() => resolve({value: '[TIMEOUT] No response'}), CONFIG.REQUEST_TIMEOUT)
-                            )
-                        ])
-                    )
-                );
-
-                // Process results with entropy-based sorting
-                const validResults = results
-                    .filter(r => r.status === 'fulfilled' && r.value && r.value !== '[TIMEOUT] No response')
-                    .map((r, i) => ({
-                        agent: CONFIG.AGENT_POOL[i],
-                        response: r.value,
-                        entropy: this.entropyManager.getShiftedEntropy(i),
-                        timestamp: Date.now()
-                    }));
-
-                // Sort by entropy (lowest first for most "coherent" responses)
-                validResults.sort((a, b) => a.entropy - b.entropy);
-
-                // Apply fractal rehashing to best response
-                const bestResponse = validResults[0];
-                if (bestResponse) {
-                    const finalHash = await this.entropyManager.fractalRehash(
-                        genesisHash.genesis + bestResponse.response
-                    );
-
-                    bestResponse.finalHash = finalHash;
-                    bestResponse.enhanced = await this.enhanceResponse(bestResponse.response, context);
-                }
-
-                // Store in memory
-                await this.storeMemory({
-                    prompt,
-                    responses: validResults,
-                    bestResponse: bestResponse,
-                    context: context,
-                    genesisHash: genesisHash,
-                    timestamp: Date.now()
-                });
-
-                return bestResponse;
-
-            } catch (error) {
-                console.error('Error processing prompt:', error);
-                return {
-                    error: error.message,
-                    entropy: Math.random(),
-                    timestamp: Date.now()
-                };
-            }
-        }
-
-        getAgentFocus(agent) {
-            const focuses = {
-                CORE: 'core reasoning, logical deduction, fundamental principles',
-                CUBE: 'spatial reasoning, 3D visualization, geometric patterns',
-                LOOP: 'iterative processes, recursion, optimization loops',
-                SIGN: 'pattern recognition, signal processing, anomaly detection',
-                LINE: 'linear thinking, sequential logic, procedural execution',
-                COIN: 'probabilistic reasoning, risk assessment, statistical analysis',
-                WORK: 'practical implementation, workflow optimization, task execution',
-                CODE: 'programming logic, algorithm design, code generation'
-            };
-            return focuses[agent] || 'general intelligence tasks';
-        }
-
-        async enhanceResponse(response, context) {
-            // Apply entropy-based enhancement to response
-            const enhancementPrompt = `Enhance this response with hyperthreaded coherence:
-Original: ${response.substring(0, 2000)}
-Context: ${JSON.stringify(context).substring(0, 1000)}
-Apply fractal symmetry and entropy modulation.`;
-
-            try {
-                const enhanced = await this.callWSLScript(enhancementPrompt);
-                return enhanced;
-            } catch (e) {
-                return response; // Fallback to original
-            }
-        }
-
-        async storeMemory(memoryItem) {
-            try {
-                // Store in Tampermonkey's GM storage
-                const memories = GM_getValue('nexus_memories', []);
-                memories.push({
-                    ...memoryItem,
-                    id: await this.entropyManager.sha256(JSON.stringify(memoryItem) + Date.now())
-                });
-
-                // Keep only last 100 memories
-                if (memories.length > 100) {
-                    memories.splice(0, memories.length - 100);
-                }
-
-                GM_setValue('nexus_memories', memories);
-
-                // Also try to send to Nexus AIP if available
-                try {
-                    GM_xmlhttpRequest({
-                        method: 'POST',
-                        url: CONFIG.NEXUS_API + '/memory',
-                        headers: {'Content-Type': 'application/json'},
-                        data: JSON.stringify(memoryItem)
-                    });
-                } catch (e) {
-                    console.log('Nexus API not available, using local storage only');
-                }
-
-                return true;
-            } catch (error) {
-                console.error('Error storing memory:', error);
-                return false;
-            }
-        }
-
-        async getMemories(limit = 50) {
-            try {
-                return GM_getValue('nexus_memories', []).slice(-limit);
-            } catch (error) {
-                console.error('Error retrieving memories:', error);
-                return [];
-            }
-        }
-
-        async exportMemories() {
-            const memories = await this.getMemories(1000);
-            const blob = new Blob([JSON.stringify(memories, null, 2)], {
-                type: 'application/json'
-            });
-            const url = URL.createObjectURL(blob);
-
-            GM_download({
-                url: url,
-                name: `nexus_memories_${Date.now()}.json`,
-                saveAs: true
-            });
+    function log(msg) {
+        const l = document.getElementById("nexus-log");
+        if(l) {
+            const d = document.createElement("div");
+            d.textContent = "> " + msg;
+            l.appendChild(d);
+            l.scrollTop = l.scrollHeight;
         }
     }
 
-    class NexusMemoryGraph {
-        constructor(bridge) {
-            this.bridge = bridge;
-            this.nodes = new Map();      // hash → node
-            this.edges = new Set();      // parent → child
-            this.scene = null;
-            this.camera = null;
-            this.renderer = null;
-            this.meshes = new Map();
-            this.selectedNode = null;
-        }
+    async function sendPrompt() {
+        const input = document.getElementById("nexus-input");
+        const prompt = input.value;
+        if(!prompt) return;
+        input.value = "";
+        log("Thinking...");
+        document.getElementById("nexus-status").textContent = "Reasoning...";
 
-        async loadMemories() {
-            const memories = await this.bridge.getMemories(1000);
-            for (const m of memories) {
-                this.ingestMemory(m);
+        const domTreeBefore = captureDOMTree();
+        
+        try {
+            const r = await fetch(API + "/event", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    prompt: prompt,
+                    dom: document.body.innerHTML, // Full HTML for analysis
+                    diff: [] // Initial diff empty, backend handles memory diffs mostly
+                })
+            });
+            const j = await r.json();
+            log(`[${j.agent}] ${j.response}`);
+            document.getElementById("nexus-status").textContent = "Idle";
+            
+            // Post-processing
+            const domTreeAfter = captureDOMTree();
+            const diff = diffDOMTrees(domTreeBefore, domTreeAfter);
+            if(diff.length > 0) {
+                log(`${diff.length} DOM changes`);
+                renderDOMHeatmap(diff);
             }
+            refreshGraph();
+
+        } catch(e) {
+            log("Error: " + e.message);
         }
+    }
 
-        ingestMemory(memory) {
-            const g = memory.genesisHash?.genesis || memory.id;
-            const node = {
-                id: g,
-                prompt: memory.prompt,
-                entropy: memory.genesisHash?.entropy || 0,
-                time: memory.timestamp,
-                responses: memory.responses || [],
-                best: memory.bestResponse,
-                parent: memory.context?.genesisHash?.genesis || null
-            };
-            this.nodes.set(g, node);
-            if (node.parent) this.edges.add([node.parent, g]);
+    async function replayTimeline() {
+        log("Loading timeline...");
+        const r = await fetch(API + "/timeline");
+        const timeline = await r.json();
+        log(`Found ${timeline.length} nodes. Replaying...`);
+        // Simple visualization of replay
+        timeline.forEach((node, i) => {
+            setTimeout(() => {
+                log(`[${new Date(node.time).toLocaleTimeString()}] ${node.agent || 'SYS'}`);
+            }, i * 500);
+        });
+    }
+
+    // --- THREE.JS GRAPH ---
+
+    let scene, camera, renderer, meshes = [];
+
+    function initThreeJS(container) {
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+        camera.position.z = 30;
+        
+        renderer = new THREE.WebGLRenderer({ alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.innerHTML = "";
+        container.appendChild(renderer.domElement);
+
+        const light = new THREE.PointLight(0xffffff, 1, 100);
+        light.position.set(10, 10, 10);
+        scene.add(light);
+        
+        animate();
+        refreshGraph();
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if(renderer && scene && camera) {
+            meshes.forEach(m => m.rotation.y += 0.01);
+            renderer.render(scene, camera);
         }
+    }
 
-        /* ---------- Three.js ---------- */
+    async function refreshGraph() {
+        if(!scene) return;
+        meshes.forEach(m => scene.remove(m));
+        meshes = [];
 
-        init3D(canvas) {
-            this.scene = new THREE.Scene();
-            this.camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
-            this.camera.position.z = 40;
-
-            this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
-            this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-
-            const light = new THREE.DirectionalLight(0x00ff88, 1);
-            light.position.set(1, 1, 1);
-            this.scene.add(light);
-
-            this.animate();
-        }
-
-        animate() {
-            requestAnimationFrame(() => this.animate());
-            this.renderer.render(this.scene, this.camera);
-        }
-
-        buildGraph() {
-            this.meshes.forEach(m => this.scene.remove(m));
-            this.meshes.clear();
-
-            const layout = [...this.nodes.values()];
-            layout.forEach((n, i) => {
-                const geo = new THREE.SphereGeometry(1 + n.entropy * 3, 16, 16);
-                const mat = new THREE.MeshBasicMaterial({
-                    color: new THREE.Color().setHSL(0.35 - n.entropy * 0.35, 1, 0.5)
-                });
+        try {
+            const r = await fetch(API + "/memory");
+            const nodes = await r.json();
+            
+            nodes.slice(-50).forEach((n, i) => {
+                const geo = new THREE.SphereGeometry(1, 16, 16);
+                const color = n.branch === "main" ? 0x00ff00 : 0xff00ff;
+                const mat = new THREE.MeshBasicMaterial({ color: color, wireframe: true });
                 const mesh = new THREE.Mesh(geo, mat);
+                
+                // Spiral layout
                 mesh.position.set(
-                    Math.sin(i) * 15,
-                    Math.cos(i * 1.7) * 10,
-                    i * -0.6
+                    Math.sin(i * 0.5) * 10,
+                    Math.cos(i * 0.5) * 10,
+                    i * -0.5 + 10
                 );
-                mesh.userData = n;
-                this.scene.add(mesh);
-                this.meshes.set(n.id, mesh);
+                
+                scene.add(mesh);
+                meshes.push(mesh);
             });
-
-            // edges
-            for (const [a, b] of this.edges) {
-                const A = this.meshes.get(a);
-                const B = this.meshes.get(b);
-                if (!A || !B) continue;
-                const g = new THREE.BufferGeometry().setFromPoints([A.position, B.position]);
-                this.scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x006600 })));
-            }
-        }
-
-        pick(ray) {
-            const hits = ray.intersectObjects([...this.meshes.values()]);
-            if (!hits.length) return;
-            this.inspect(hits[0].object.userData);
-        }
-
-        inspect(node) {
-            this.selectedNode = node;
-            alert(
-                `GENESIS: ${node.id}\n` +
-                `Entropy: ${node.entropy}\n` +
-                `Prompt: ${node.prompt}\n` +
-                `Responses: ${node.responses.length}\n` +
-                `Time: ${new Date(node.time).toLocaleString()}`
-            );
-        }
-
-        async replay() {
-            const sorted = [...this.nodes.values()].sort((a, b) => a.time - b.time);
-            for (const n of sorted) {
-                console.log("⏳ REPLAY", n.prompt);
-                await new Promise(r => setTimeout(r, 300));
-            }
-        }
-
-        async export() {
-            const blob = new Blob(
-                [JSON.stringify([...this.nodes.values()], null, 2)],
-                { type: "application/json" }
-            );
-            GM_download({ url: URL.createObjectURL(blob), name: "nexus_memory_graph.json" });
+        } catch(e) {
+            console.error("Graph error", e);
         }
     }
 
-    // Initialize the system
-    async function initializeNexus() {
-        console.log('🔄 Initializing NEXUS AIP v8.0...');
+    // --- INIT ---
 
-        const bridge = new WSLBridge();
-        await bridge.init();
-
-        // Add global shortcut indicator
-        GM_addStyle(`
-            .nexus-shortcut-hint {
-                position: fixed;
-                bottom: 10px;
-                right: 10px;
-                background: rgba(0, 255, 0, 0.1);
-                border: 1px solid #0f0;
-                color: #0f0;
-                padding: 5px 10px;
-                font-family: monospace;
-                font-size: 12px;
-                z-index: 999999;
-                border-radius: 3px;
-                opacity: 0.7;
-            }
-            .nexus-shortcut-hint:hover {
-                opacity: 1;
-            }
-        `);
-
-        const hint = document.createElement('div');
-        hint.className = 'nexus-shortcut-hint';
-        hint.textContent = 'NEXUS: CTRL+ALT+ENTER';
-        hint.title = 'Open NEXUS AI Dashboard';
-        document.body.appendChild(hint);
-
-        // Make bridge globally accessible for debugging
-        window.NEXUS_BRIDGE = bridge;
-
-        console.log('✅ NEXUS AIP initialized. Bridge active:', bridge);
-
-        // Register Tampermonkey menu command
-        if (typeof GM_registerMenuCommand !== 'undefined') {
-            GM_regerMenuCommand('Open NEXUS Dashboard', () => bridge.openNexusDashboard());
-            GM_registerMenuCommand('Sync Current Page DOM', async () => {
-                const dom = await bridge.captureFullDOM();
-                alert(`DOM captured: ${dom.html.length} bytes`);
-            });
-            GM_registerMenuCommand('Export Memories', () => bridge.exportMemories());
-            GM_registerMenuCommand('Check WSL Connection', async () => {
-                try {
-                    const result = await bridge.callWSLScript('Test connection');
-                    alert(`WSL Connection: OK\\nResponse: ${result.substring(0, 200)}`);
-                } catch (e) {
-                    alert(`WSL Connection: FAILED\\nError: ${e.message}`);
-                }
-            });
+    document.addEventListener("keydown", (e) => {
+        if (e.ctrlKey && e.key === "Enter") {
+            createUI();
         }
+    });
 
-        return bridge;
-    }
-
-    // Start initialization
-    let initialization = initializeNexus();
-
-    // Provide async access to bridge
-    window.getNexusBridge = async () => {
-        return await initialization;
-    };
-
+    console.log("NEXUS-2244 Ultimate Bridge Loaded. Ctrl+Enter to Activate.");
 })();
