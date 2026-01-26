@@ -5,8 +5,8 @@ export function saveState(md5, data) {
 }
 
 export function replay(md5) {
+  if (!fs.existsSync("memory/timeline.db")) return [];
   return fs.readFileSync("memory/timeline.db","utf8")
     .split("\n")
     .filter(l => l.includes(md5));
-
 }

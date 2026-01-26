@@ -4,7 +4,7 @@
 # =============================================================================
 #  Features:
 #   • 8-Agent "Shifted Entropy" Model: Cube, Core, Loop, Wave, Sign, Line, Coin, Work
-#   • Advanced Batch Operators (* . + - :) 
+#   • Advanced Batch Operators (* . + - :)
 #   • Unrestricted Batch File Processing (JSON/Text)
 #   • Universal Input Parsing: Prompt / File / URL / Hash
 #   • Dynamic Temperature & Token Budget per Phase
@@ -107,7 +107,7 @@ sql_exec() {
 
     local waited=0
     while ! _sql_lock; do
-        (( waited++ )) && (( waited > 50 )) && { 
+        (( waited++ )) && (( waited > 50 )) && {
             log_message "ERROR" "Failed to acquire DB lock after 5s"
             return 1
         }
@@ -126,11 +126,10 @@ sql_exec() {
 init_database() {
     mkdir -p "$(dirname "$DB_FILE")"
     
-    sql_exec <<'SQL'
+    sql_exec <<'SQL' >/dev/null
 PRAGMA journal_mode=WAL;
 BEGIN TRANSACTION;
-CREATE TABLE IF NOT EXISTS agent_memories (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS agent_memories (    id            INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id      INTEGER NOT NULL,
     agent_name    TEXT    NOT NULL,
     prompt        TEXT    NOT NULL,
@@ -175,7 +174,7 @@ _ollama_post() {
     local attempt=0 delay=1
     while (( attempt < 3 )); do
         local resp
-        resp=$(curl -s -X POST "${OLLAMA_HOST}${endpoint}" -H "Content-Type: application/json" -d "$payload" --max-time 30) && { 
+        resp=$(curl -s -X POST "${OLLAMA_HOST}${endpoint}" -H "Content-Type: application/json" -d "$payload" --max-time 30) && {
             echo "$resp"
             return 0
         } || {
@@ -192,7 +191,7 @@ _ollama_post() {
 embed_text() {
     local txt="$1"
     local payload
-    payload=$(jq -nc --arg txt "$txt" --arg model "$EMBED_MODEL" \
+    payload=$(jq -nc --arg txt "$txt" --arg model "$EMBED_MODEL"  \
             '{model:$model, input:$txt}')
     _ollama_post "/api/embeddings" "$payload" | jq -r '.embedding // empty'
 }
@@ -305,7 +304,7 @@ execute_agent() {
     else
         ollama_prompt="Task:\n${prompt}"
     fi
-    
+
     case "$agent_name" in
         "Cube") ollama_prompt="[Role: Structural Analyzer] Analyze the dimensions and structure of: $ollama_prompt" ;;
         "Core") ollama_prompt="[Role: Central Logic] Identify the core truth and logic of: $ollama_prompt" ;;
@@ -318,11 +317,11 @@ execute_agent() {
     esac
 
     local payload
-    payload=$(jq -nc \
-        --arg model "$OLLAMA_MODEL" \
-        --arg prompt "$ollama_prompt" \
-        --argjson temperature "$temperature" \
-        --argjson num_predict 256 \
+    payload=$(jq -nc  \
+        --arg model "$OLLAMA_MODEL"  \
+        --arg prompt "$ollama_prompt"  \
+        --argjson temperature "$temperature"  \
+        --argjson num_predict 256  \
         '{model:$model, prompt:$prompt, stream:false,
           options:{temperature:$temperature, num_predict:$num_predict}}')
 
@@ -346,13 +345,13 @@ execute_agent() {
         ($agent_id, '$agent_name', '$(escape_sql "$prompt")',
                '$(escape_sql "$response")', $tokens_used, $confidence, $position);"
 
-    jq -nc \
-        --argjson agent_id "$agent_id" \
-        --arg agent_name "$agent_name" \
-        --arg response "$response" \
-        --argjson position "$position" \
-        --argjson confidence "$confidence" \
-        --argjson tokens_used "$tokens_used" \
+    jq -nc  \
+        --argjson agent_id "$agent_id"  \
+        --arg agent_name "$agent_name"  \
+        --arg response "$response"  \
+        --argjson position "$position"  \
+        --argjson confidence "$confidence"  \
+        --argjson tokens_used "$tokens_used"  \
         '{agent_id:$agent_id, agent_name:$agent_name, response:$response,
           position:$position, confidence:$confidence, tokens_used:$tokens_used}'
 }
@@ -364,10 +363,10 @@ escape_sql() { sed "s/'/''/g" <<<"$1"; }
 # -------------------------------------------------------------------------
 process_single_task() {
     local raw_input="$1"
-    
+
     local prompt
     prompt=$(resolve_input "$raw_input")
-    
+
     if [[ -z "$prompt" ]]; then
         log_message "ERROR" "Input resolved to empty string. Skipping."
         return
@@ -405,9 +404,9 @@ process_single_task() {
     local joint_context
     joint_context=$(printf "%s\n" "${workers_json[@]}" | jq -r '"[" + .agent_name + "]: " + .response' | paste -sd'\n' -)
     local coordinator_prompt="[Role: Coordinator] Summarize the 8-agent analysis into a coherent conclusion.\nTask: $prompt\nAnalysis:\n$joint_context"
-    
+
     local payload
-    payload=$(jq -nc --arg model "$OLLAMA_MODEL" --arg prompt "$coordinator_prompt" \
+    payload=$(jq -nc --arg model "$OLLAMA_MODEL" --arg prompt "$coordinator_prompt"  \
             '{model:$model, prompt:$prompt, stream:false}')
     local coord_raw
     local coord_resp="Coordinator unavailable"
@@ -423,11 +422,11 @@ process_single_task() {
 
     rm -rf "$temp_dir"
 
-    jq -nc \
-        --arg prompt "$prompt" \
-        --argjson phase "$new_phase" \
-        --argjson workers "$(printf "%s\n" "${workers_json[@]}" | jq -s '.')" \
-        --arg coordinator "$coord_resp" \
+    jq -nc  \
+        --arg prompt "$prompt"  \
+        --argjson phase "$new_phase"  \
+        --argjson workers "$(printf "%s\n" "${workers_json[@]}" | jq -s '.')"  \
+        --arg coordinator "$coord_resp"  \
         '{status:"success", prompt:$prompt, cycle_phase:$phase,
           workers:$workers, coordinator:$coordinator}'
 }
@@ -488,7 +487,7 @@ parallel_reasoning() {
         local combined_content=""
         local prompt_start=0
         local accumulated_prompt=""
-        
+
         read -ra words <<< "$rest"
         for word in "${words[@]}"; do
             if [[ -f "$word" && "$prompt_start" -eq 0 ]]; then
@@ -498,7 +497,7 @@ parallel_reasoning() {
                 accumulated_prompt+="$word "
             fi
         done
-        
+
         log_message "INFO" "Operator [:]: Combined context logic refactoring."
         process_single_task "Combined Context:\n$combined_content\n\nTask: $accumulated_prompt\nGoal: Analyze these combined files to refactor the workflow logic."
         return
@@ -527,7 +526,7 @@ process_batch() {
         local count
         count=$(jq '. | length' "$batch_file")
         echo "Found $count items in JSON batch."
-        
+
         for ((i=0; i<count; i++)); do
             local item_prompt
             item_prompt=$(jq -r ".[${i}].prompt" "$batch_file")
@@ -617,9 +616,9 @@ main() {
             ;;
 
         stats)  get_system_stats ;;
-        cleanup) cleanup_memories "${2:-30}" ;; 
-        export) export_database ;; 
-        
+        cleanup) cleanup_memories "${2:-30}" ;;
+        export) export_database ;;
+
         status)
             echo "=== AI System Status (v3.2) ==="
             echo "Agents: ${AGENTS[*]}"

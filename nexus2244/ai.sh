@@ -8,37 +8,34 @@ PROMPT="$*"
 echo "{ \"genesis\": \"$GENESIS\" }" > memory/memory.json
 
 declare -A AGENTS
-AGENTS[cube]="gemma3:1b"
-AGENTS[core]="deepseek-v3.1:671b-cloud"
-AGENTS[loop]="loop:latest"
-AGENTS[line]="line:latest"
-AGENTS[wave]="qwen3-vl:2b"
-AGENTS[coin]="stable-code:latest"
-AGENTS[code]="phi:2.7b"
-AGENTS[work]="deepseek-v3.1:671b-cloud"
+AGENTS[coder]="deepseek-coder"
+AGENTS[agi]="deepseek-r1"
+AGENTS[nemodian]="wave"
+AGENTS[sysop]="llama3.1"
 
 stream_agent() {
   name=$1
   model=$2
-  
-  # Ensure the stream file exists
-  touch "entropy/$name.stream"
-  
-  ollama run "$model" "$PROMPT" | while read -r token; do
-    echo -n "$token" >> "entropy/$name.stream"
+  # Note: ollama must be running and have the models
+  ollama run "$model" "$PROMPT" --stream | while read -r token; do
+    echo "$token" >> entropy/$name.stream
     sha=$(echo -n "$token" | sha256sum | cut -d' ' -f1)
     md5=$(echo -n "$sha" | md5sum | cut -d' ' -f1)
 
     node -e "
       import {broadcast} from './server.js';
-      broadcast('$name','$(echo -n "$token" | sed "s/'/\\'/g")','$sha','$GENESIS','$md5');
-    " 2>/dev/null || true
+      broadcast('$name','$token','$sha','$GENESIS','$md5');
+    "
   done
 
-  if [ -f "entropy/$name.stream" ]; then
-    cat "entropy/$name.stream" | python3 vector.js || true
-  fi
+  cat entropy/$name.stream | python3 vector.js
 }
+
+# Start server in background? The prompt doesn't explicitly say how server.js runs, 
+# but ai.sh calls broadcast. This implies server.js might need to be imported or run separately.
+# Actually, the 'node -e' command imports from './server.js'. 
+# This means server.js must export broadcast and also start the WebSocket server when imported.
+# My server.js does start the server on import (it creates wss).
 
 for a in "${!AGENTS[@]}"; do
   stream_agent "$a" "${AGENTS[$a]}" &
