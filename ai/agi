@@ -1,0 +1,206 @@
+qq#!/usr/bin/env bash
+# ~/bin/ai - Local AI CLI for Ollama
+
+set -euo pipefail
+export AI_MEMORY_DIR="$HOME/.ai_memory"
+export OLLAMA_HOST="http://localhost:11435"
+export OLLAMA_MODEL="Core:latest"
+
+log_info()  { printf "\033[34m[INFO]\033[0m %s\n" "$*"; }
+log_warn()  { printf "\033[33m[WARN]\033[0m %s\n" "$*"; }
+log_error() { printf "\033[31m[ERROR]\033[0m %s\n" "$*"; }
+log_success() { printf "\033[32m[SUCCESS]\033[0m %s\n" "$*"; }
+
+mkdir -p "$AI_MEMORY_DIR"
+
+# ------------------------------
+# Initialize AI environment
+# ------------------------------
+ai_init() {
+    log_info "Initializing AI environment..."
+    mkdir -p "$AI_MEMORY_DIR"
+    log_success "Environment ready"
+}
+
+# ------------------------------
+# Start Ollama server
+# ------------------------------
+ai_start() {
+    log_info "Starting AI server (Ollama)..."
+    if command -v ollama >/dev/null 2>&1; then
+        ollama start &
+        sleep 2
+        if ! curl -s "$OLLAMA_HOST" >/dev/null; then
+            log_warn "Ollama not responding, restarting..."
+            sleep 1
+            ollama start &
+        fi
+        log_success "Ollama started"
+    else
+        log_error "Ollama CLI not found"
+        return 1
+    fi
+}
+
+# ------------------------------
+# Core AI processing
+# ------------------------------
+ai_process_dynamic() {
+    local prompt="$1"
+    local use_memory="${2:-true}"
+    local delay="${3:-0}"
+
+    # --- Load known topics ---
+    local known_topics=()
+    if [[ -d "$AI_MEMORY_DIR" ]]; then
+        while IFS= read -r -d '' topic; do
+            known_topics+=("$(basename "$topic")")
+        done < <(find "$AI_MEMORY_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+    fi
+
+    # --- Auto-tagging ---
+    local prompt_words
+    read -r -a prompt_words <<< "$(echo "$prompt" | tr -cs '[:alnum:]' ' ')"
+    local matched_topics=()
+    local unique_words=()
+    for word in "${prompt_words[@]}"; do
+        word="${word,,}"
+        [[ ${#word} -gt 2 ]] && unique_words+=("$word")
+    done
+    unique_words=($(printf "%s\n" "${unique_words[@]}" | sort -u))
+
+    for word in "${unique_words[@]}"; do
+        for topic in "${known_topics[@]}"; do
+            if [[ "${topic,,}" == *"$word"* || "$word" == *"${topic,,}"* ]]; then
+                matched_topics+=("$topic")
+            fi
+        done
+    done
+
+    [[ ${#matched_topics[@]} -eq 0 ]] && matched_topics=("general")
+    matched_topics=($(printf "%s\n" "${matched_topics[@]}" | sort -u))
+
+    # --- Load memory ---
+    local context=""
+    if [[ "$use_memory" == "true" ]]; then
+        for topic in "${matched_topics[@]}"; do
+            local topic_dir="$AI_MEMORY_DIR/$topic"
+            if [[ -f "$topic_dir/summary.mem" ]]; then
+                context+="=== $topic ===$(cat "$topic_dir/summary.mem")"$'\n\n'
+            fi
+        done
+    fi
+
+    local full_prompt="${context}${prompt}"
+    log_info "Thinking (memory=${use_memory}, delay=${delay}s, topics=${matched_topics[*]})..."
+
+    # --- API call ---
+    local temp_file
+    temp_file=$(mktemp)
+    local http_code
+    http_code=$(curl -s -w "%{http_code}" -X POST "$OLLAMA_HOST/api/generate" \
+        -H "Content-Type: application/json" \
+        -d "{\"model\":\"$OLLAMA_MODEL\",\"prompt\":\"$full_prompt\",\"stream\":true}" \
+        -o "$temp_file")
+
+    if [[ $http_code -ne 200 ]]; then
+        log_error "API request failed with HTTP $http_code"
+        [[ -f "$temp_file" ]] && log_error "Error: $(cat "$temp_file")"
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    # --- Process tokens ---
+    local token_count=0
+    local response=""
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            local token
+            token=$(echo "$line" | jq -r '.response // empty' 2>/dev/null || \
+                   echo "$line" | grep -o '"response":"[^"]*"' | \
+                   sed 's/"response":"//;s/"$//;s/\\n/\n/g;s/\\"/"/g')
+            if [[ -n "$token" ]]; then
+                token_count=$((token_count+1))
+                printf "\033[35m[token %03d]\033[0m %s" "$token_count" "$token"
+                response+="$token"
+                [[ "$delay" != "0" ]] && sleep "$delay"
+            fi
+        fi
+    done < "$temp_file"
+    echo
+    rm -f "$temp_file"
+
+    # --- Save memory ---
+    if [[ -n "$response" && "$use_memory" == "true" ]]; then
+        for topic in "${matched_topics[@]}"; do
+            local topic_dir="$AI_MEMORY_DIR/$topic"
+            mkdir -p "$topic_dir"
+            local timestamp
+            timestamp=$(date +%Y%m%d%H%M%S)
+            local memory_file="$topic_dir/${timestamp}.mem"
+            echo -e "PROMPT: $prompt\nRESPONSE: $response\nTIMESTAMP: $timestamp" > "$memory_file"
+            local summary_file="$topic_dir/summary.mem"
+            ls -1t "$topic_dir"/*.mem 2>/dev/null | head -n 3 | xargs cat > "$summary_file.tmp"
+            mv "$summary_file.tmp" "$summary_file" 2>/dev/null || true
+        done
+        log_info "Saved to topics: ${matched_topics[*]}"
+    fi
+
+    return 0
+}
+
+# ------------------------------
+# Batch processing
+# ------------------------------
+ai_batch() {
+    local batch_source="$1"
+    local use_memory="${2:-true}"
+    local delay="${3:-0}"
+
+    if [[ -z "$batch_source" ]]; then
+        log_error "Usage: ai batch  [use_memory] [delay]"
+        return 1
+    fi
+
+    if [[ ! -e "$batch_source" ]]; then
+        log_error "Source '$batch_source' not found"
+        return 1
+    fi
+
+    if [[ -f "$batch_source" ]]; then
+        while IFS= read -r prompt; do
+            [[ -z "$prompt" ]] && continue
+            log_info "Processing prompt: $prompt"
+            ai_process_dynamic "$prompt" "$use_memory" "$delay"
+        done < "$batch_source"
+    elif [[ -d "$batch_source" ]]; then
+        for f in "$batch_source"/*; do
+            [[ ! -f "$f" ]] && continue
+            local prompt
+            prompt=$(cat "$f")
+            log_info "Processing file: $f"
+            ai_process_dynamic "$prompt" "$use_memory" "$delay"
+        done
+    fi
+    log_info "Batch processing complete"
+}
+
+# ------------------------------
+# CLI entry
+# ------------------------------
+ai() {
+    case "${1:-}" in
+        init) shift; ai_init "$@" ;;
+        start) shift; ai_start "$@" ;;
+        process) shift; ai_process_dynamic "$@" ;;
+        batch) shift; ai_batch "$@" ;;
+        *) log_info "Usage: ai {init|start|process  [use_memory] [delay]|batch  [use_memory] [delay]}" ;;
+    esac
+}
+
+# ------------------------------
+# Main
+# ------------------------------
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    ai "$@"
+fi

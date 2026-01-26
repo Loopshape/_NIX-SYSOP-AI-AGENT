@@ -1,0 +1,9 @@
+{
+  "name": "nexus2244",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "sqlite3": "^5.1.7",
+    "ws": "^8.19.0"
+  }
+}

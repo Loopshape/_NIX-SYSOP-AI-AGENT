@@ -1,0 +1,9 @@
+CREATE TABLE meta (
+  id INTEGER PRIMARY KEY,
+  genesis TEXT,
+  logos REAL,
+  chaos REAL,
+  nomos REAL,
+  ts DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+

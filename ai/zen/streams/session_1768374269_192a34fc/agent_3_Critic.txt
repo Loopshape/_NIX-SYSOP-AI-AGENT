@@ -1,0 +1,9 @@
+=== AGENT 3: Critic ===
+Phase: 2.356 rad
+Entropy: 0.5
+Temperature: 0.7
+Duration: 0s
+Timestamp: 2026-01-14 07:04:29 UTC
+---
+[Timeout] Agent Critic took too long
+---

@@ -1,0 +1,9 @@
+{
+  "agent_id": 7,
+  "agent_name": "Integrator",
+  "phase": "5.498",
+  "entropy": "0.5",
+  "response": "[Timeout] Agent Integrator took too long",
+  "stream_file": "/home/loop/_/ai/zen/streams/session_1768374269_192a34fc/agent_7_Integrator.txt",
+  "duration_seconds": 0
+}

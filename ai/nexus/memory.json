@@ -1,0 +1,16 @@
+{
+  "genesis": "e0f4c8c8540e4f7b1eb5000144355f5049a84c999c7615a9884fe1d7e45d62df",
+  "started": "2026-01-24T04:37:26+01:00",
+  "states": {
+    "d636ce09b555bdf0a2fd351163000e46": {
+      "genesis": "e0f4c8c8540e4f7b1eb5000144355f5049a84c999c7615a9884fe1d7e45d62df",
+      "timestamp": "2026-01-24T04:37:28+01:00",
+      "sha256": {
+        "coder": "[agent:coder] genesis=e0f4c8c8540e4f7b1eb5000144355f5049a84c999c7615a9884fe1d7e45d62df\n[agent:coder] prompt=reason\ndesign an ai that understands entropy\nac5725269a283f6a3de866c559ea43f5a40f6420bb3464c0da2be1eea12d4f79",
+        "agi": "[agent:agi] genesis=e0f4c8c8540e4f7b1eb5000144355f5049a84c999c7615a9884fe1d7e45d62df\n[agent:agi] prompt=reason\ndesign an ai that understands entropy\n63c2f647aa22e59e191b99f57e5534d4c4b46235d22d1294eab09d7867e08e83",
+        "nemodian": "[agent:nemodian] genesis=e0f4c8c8540e4f7b1eb5000144355f5049a84c999c7615a9884fe1d7e45d62df\n[agent:nemodian] prompt=reason\ndesign an ai that understands entropy\nd23af77ddbf9a35ac2b4812661b7c41f03a21d6f10af67f4ab5753a9d91ecab5",
+        "sysop": "[agent:sysop] genesis=e0f4c8c8540e4f7b1eb5000144355f5049a84c999c7615a9884fe1d7e45d62df\n[agent:sysop] prompt=reason\ndesign an ai that understands entropy\n842fe17d735e4449e88ff1c4c7c59604191e43880accbf2d9000a37777b48c0e"
+      }
+    }
+  }
+}

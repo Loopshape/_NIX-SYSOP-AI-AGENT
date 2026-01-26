@@ -1,0 +1,63 @@
+[0;36m[CONTEXT][0m Scanning directory: /home/loop/_
+[
+  {
+    "file": "/home/loop/_/test_run.sh",
+    "hash": "390dfc82fcf3827e3e54791cfb38795e95f62a39d68d413a31176ed8d95237b6",
+    "language": "sh",
+    "size": 975
+  },
+  {
+    "file": "/home/loop/_/sysop_full-installer.sh",
+    "hash": "ce822c4bfd40f575454d3f847efad268f52d069815b16dfa3b34e59c17b9f791",
+    "language": "sh",
+    "size": 4769
+  },
+  {
+    "file": "/home/loop/_/ai_launch.sh",
+    "hash": "179e0b51089d481cf75ab9e35b22aae5ff953ac148e0a6cb2cf914c2c941d19d",
+    "language": "sh",
+    "size": 1497
+  },
+  {
+    "file": "/home/loop/_/sql_admin.sh",
+    "hash": "47fd5e1d480bb83894775ab94bb7928bcfd30739a965d4d160c933bf77a8f9c4",
+    "language": "sh",
+    "size": 34
+  },
+  {
+    "file": "/home/loop/_/bootstrap.sh",
+    "hash": "c38e389c227606d0fcc9c4c438e8793ef1a0201206efd9dd31b2c4e19c789081",
+    "language": "sh",
+    "size": 1870
+  },
+  {
+    "file": "/home/loop/_/agent.py",
+    "hash": "d3dabf657e39f90b9e813ab87b756afa3ee28d7b794d32f9d54f6dbfd2b8f5ef",
+    "language": "py",
+    "size": 4417
+  },
+  {
+    "file": "/home/loop/_/proot-distro.-minimal.setup.sh",
+    "hash": "efc25fdc4de8186a8a820ed39e7ec0e05d028b0d44886b532905dd5e7fc65b03",
+    "language": "sh",
+    "size": 348
+  },
+  {
+    "file": "/home/loop/_/ai_modules.sh",
+    "hash": "1ddec87cb0d77fb5ae0d1496c525309cf9b7f874002036165dc730f486aea459",
+    "language": "sh",
+    "size": 389
+  },
+  {
+    "file": "/home/loop/_/web/orchestrator.py",
+    "hash": "6d100dd969efe0786879eb6f8c0f2adce1bf7d30040170fc373140b97207a298",
+    "language": "py",
+    "size": 1349
+  },
+  {
+    "file": "/home/loop/_/tsconfig.json",
+    "hash": "22296c438cd554620ec51347bd4dbeb17afabc8aeac27a5242b84b30031b94b2",
+    "language": "json",
+    "size": 543
+  }
+]

@@ -1,0 +1,24 @@
+(.env.local) loop@LOOPCORE:~$ ai
+[INFO] Ensuring SQLite database schema at /home/loop/ai-runtime/.repository/wsl-runtime/ai_memory.db
+[INFO] Database initialisation complete
+WSL Runtime AI Orchestration v3.0
+================================
+Commands:
+  reason "<prompt>"      – Run the full 8-Agent + Coordinator pipeline (JSON output)
+  recall "<query>" [N]   – Keyword-based memory search (default N=10)
+  stats                  – System statistics (JSON)
+  cleanup [days]         – Delete memories older than N days (default 30)
+  export                 – Export a timestamped DB backup (rotates to 5 latest)
+  status                 – Quick human-readable status dump
+  agents                 – List agents with their 2π/8 phase angles
+  models                 – List available Ollama models
+  help                   – Show this help
+
+Configuration:
+  You may create a file $HOME/.ai_config to override any constant
+  (OLLAMA_HOST, OLLAMA_MODEL, MAX_CONCURRENT_AGENTS, …).
+
+Examples:
+  $0 reason "Analyze this code and suggest improvements"
+  $0 recall "semantic memory" 5
+cat: 'entropy/*.sha': No such file or directory

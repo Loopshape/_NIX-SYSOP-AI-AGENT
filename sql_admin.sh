@@ -1,1 +1,1 @@
-sqlite3 ~/.local_ai/ai_modules.db
+/home/loop/.repository/ai-runtime/sql_admin.sh

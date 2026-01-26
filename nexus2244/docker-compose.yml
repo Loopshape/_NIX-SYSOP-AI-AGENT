@@ -1,0 +1,11 @@
+version: "3.8"
+services:
+  nexus:
+    build: .
+    ports:
+      - "2244:2244"
+    volumes:
+      - ./memory:/nexus/memory
+      - ./entropy:/nexus/entropy
+    stdin_open: true
+    tty: true

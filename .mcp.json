@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "onecompiler": {
+      "command": "npx",
+      "args": ["-y", "@onecompiler/onecompiler-mcp-server"],
+      "env": {
+        "ONECOMPILER_API_KEY": "1460e356cdmshd282a8541276569p1a8b22jsnb2587b91f18b",
+        "ONECOMPILER_PROVIDER": "rapidapi"
+      }
+    }
+  }
+}

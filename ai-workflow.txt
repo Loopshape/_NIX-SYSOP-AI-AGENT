@@ -1,0 +1,173 @@
+You are a fully autonomous system operator with permission to:
+- create directories
+- write files
+- execute shell commands
+- install packages
+- build Docker images
+- start services
+
+Your mission is to construct the full NEXUS-2244 Cognitive Kernel as specified below.
+This is not a mockup. Everything must be written to disk and executable.
+
+Work in the user’s home directory and create:
+
+~/nexus2244
+
+Do not ask questions. Perform all actions deterministically.
+
+-----------------------------------------------------------
+PHASE 1 — DIRECTORY & CORE STRUCTURE
+-----------------------------------------------------------
+
+Create the following directory tree:
+
+nexus2244/
+├── Dockerfile
+├── docker-compose.yml
+├── ai.sh
+├── server.js
+├── package.json
+├── entropy/
+├── memory/
+│   ├── memory.json
+│   ├── vectors.db
+│   └── timeline.db
+└── ui/
+    └── index.html
+
+-----------------------------------------------------------
+PHASE 2 — Docker Runtime
+-----------------------------------------------------------
+
+Write Dockerfile:
+
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt update && apt install -y curl git jq nodejs npm python3 python3-pip ca-certificates
+RUN curl -fsSL https://ollama.com/install.sh | sh
+WORKDIR /nexus
+COPY . .
+RUN npm install ws sqlite3
+EXPOSE 2244
+CMD ["bash", "ai.sh"]
+
+Write docker-compose.yml:
+
+version: "3.8"
+services:
+  nexus:
+    build: .
+    ports:
+      - "2244:2244"
+    volumes:
+      - ./memory:/nexus/memory
+      - ./entropy:/nexus/entropy
+    stdin_open: true
+    tty: true
+
+-----------------------------------------------------------
+PHASE 3 — WebSocket Router
+-----------------------------------------------------------
+
+Write server.js:
+
+import WebSocket, { WebSocketServer } from "ws";
+
+const wss = new WebSocketServer({ port: 2244 });
+let clients = [];
+
+wss.on("connection", ws => {
+  clients.push(ws);
+  ws.on("close", () => clients = clients.filter(c => c !== ws));
+});
+
+export function broadcast(agent, token, sha256, genesis) {
+  const msg = JSON.stringify({ agent, token, sha256, genesis });
+  clients.forEach(c => c.send(msg));
+}
+
+-----------------------------------------------------------
+PHASE 4 — ai.sh (NEXUS Kernel)
+-----------------------------------------------------------
+
+Write ai.sh:
+
+#!/usr/bin/env bash
+set -e
+
+mkdir -p entropy memory
+
+GENESIS=$(date +%s%N | sha256sum | cut -d' ' -f1)
+PROMPT="$*"
+echo "{ \"genesis\": \"$GENESIS\", \"states\": {} }" > memory/memory.json
+
+declare -A AGENTS
+AGENTS[coder]="deepseek-coder"
+AGENTS[agi]="deepseek-r1"
+AGENTS[nemodian]="wave"
+AGENTS[sysop]="llama3.1"
+
+stream_agent() {
+  name=$1
+  model=$2
+  ollama run "$model" "$PROMPT" --stream | while read -r token; do
+    echo "$token" >> "entropy/$name.stream"
+    sha=$(echo -n "$token" | sha256sum | cut -d' ' -f1)
+    echo "$sha" >> "entropy/$name.sha"
+    node -e "
+      import {broadcast} from './server.js';
+      broadcast('$name', '$token', '$sha', '$GENESIS');
+    "
+  done
+}
+
+for a in "${!AGENTS[@]}"; do
+  stream_agent "$a" "${AGENTS[$a]}" &
+done
+wait
+
+-----------------------------------------------------------
+PHASE 5 — Vector Memory
+-----------------------------------------------------------
+
+Install:
+
+pip install sentence-transformers sqlite3
+
+After ai.sh completes, generate embeddings for every entropy/*.stream
+Store:
+
+- md5(rehash)
+- sha256(tokens)
+- embedding
+- full text
+
+in memory/vectors.db and memory/timeline.db
+
+-----------------------------------------------------------
+PHASE 6 — Web UI
+-----------------------------------------------------------
+
+Write ui/index.html that:
+- connects to ws://localhost:2244
+- displays tokens per agent in real time
+- shows GENESIS and MD5 state
+- allows replay by selecting previous state
+
+-----------------------------------------------------------
+PHASE 7 — Build & Launch
+-----------------------------------------------------------
+
+Execute:
+
+docker compose build
+docker compose up
+
+System is ready when browser can open:
+http://localhost:2244/ui/index.html
+
+-----------------------------------------------------------
+
+This is a cryptographically indexed, multi-agent cognitive kernel.
+All components must be live and functional when finished.
+

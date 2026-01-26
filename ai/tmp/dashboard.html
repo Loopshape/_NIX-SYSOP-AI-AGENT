@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>2244 AI Dashboard</title>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-okaidia.min.css" rel="stylesheet"/>
+<style>body{font-family:monospace;background:#1e1e1e;color:#fff;}</style>
+</head>
+<body>
+<h1>2244 AI Crew Dashboard</h1>
+<pre id="qbits-log"></pre>
+<script>
+fetch("/api/qbits").then(r=>r.json()).then(data=>{
+  document.getElementById("qbits-log").textContent = JSON.stringify(data,null,2);
+});
+</script>
+</body>
+</html>

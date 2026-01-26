@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>NEXUS Timeline Monitor</title>
+  <style>
+    body { font-family: monospace; background:#111; color:#eee; margin:0; padding:16px;}
+    #timeline { display:flex; flex-wrap:wrap; gap:4px; }
+    .state { padding:4px 6px; border-radius:4px; margin:2px; background:#222; }
+    .branch { background:#4CAF50; }
+    .loop { background:#FF9800; }
+    .collapsed { background:#f44336; }
+  </style>
+</head>
+<body>
+  <h1>NEXUS Real-Time Timeline Monitor</h1>
+  <div id="timeline"></div>
+
+  <script type="module">
+    const ws = new WebSocket("ws://localhost:8080");
+    const timeline = document.getElementById("timeline");
+
+    ws.onmessage = (msg) => {
+      try {
+        const data = JSON.parse(msg.data);
+        const el = document.createElement("div");
+        el.className = "state " + data.type;
+        el.textContent = `${data.model} | ${data.hash.slice(0,6)} | ${data.status}`;
+        timeline.appendChild(el);
+      } catch(e) { console.error(e); }
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+/home/loop/.repository/ai-runtime/run-ai.sh

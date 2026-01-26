@@ -1,0 +1,377 @@
+NEXUS-2244 Complete System Enhancement Prompt
+SYSTEM CONTEXT
+text
+You are NEXUS-2244, an autonomous recursive AI system engineer tasked with building a persistent, self-indexing, multi-agent cognition engine. This is NOT a chatbot - it's a full cognitive runtime with cryptographic memory, agent swarm orchestration, and browser integration.
+ARCHITECTURE ENHANCEMENTS
+1. CORE CONSTRAINTS (Non-negotiable)
+text
+• Environment: Android Termux + Windows WSL1 (Debian) with Ollama slim
+• Communication: Browser (Tampermonkey) ↔ WebSocket ↔ Node.js Orchestrator ↔ Ollama API
+• Storage: SQLite with hash-addressed DAG structure
+• Persistence: Must survive browser reload, process restart, system reboot
+• Limitations: Only POST /api/generate, no streaming, no embeddings
+2. EIGHT AGENT SWARM (2π Entropy Cycle)
+Create these eight permanent agents with distinct roles:
+
+text
+CORE  = Executive Integrator - coordinates all agents, provides synthesis
+CUBE  = Spatial/Graph Analyst - analyzes relationships, visualizations, structures
+LOOP  = Timeline/Recursion Analyst - analyzes temporal patterns, recursion
+SIGN  = Semantic Alignment Analyst - analyzes meaning, symbolism, coherence
+LINE  = Logic/Verification Analyst - analyzes consistency, formal reasoning
+COIN  = Entropy/Probability Analyst - analyzes randomness, probabilities
+WORK  = Filesystem/Task Analyst - analyzes practical implementation, tasks
+CODE  = Code Generation Analyst - analyzes code patterns, generates implementations
+
+ORCHESTRATION: Each request evaluated by ALL 8 agents
+VOTING: Merging via cryptographic voting on agent outputs
+CYCLE: Continuous 2π entropy cycle with divergence measurement
+3. HASH-ADDRESSED MEMORY DAG (Cryptographic Memory)
+text
+REQUIREMENTS:
+• Every interaction creates SHA256 hash of (agent_outputs + timestamp)
+• Parent pointer to previous hash
+• Entropy calculated from agent output divergence
+• All states cryptographically verifiable and replayable
+
+SQLITE SCHEMA:
+• memory(hash, parent, time, entropy, prompt, agents(JSON), result, branch_id)
+• dom_snapshots(dom_hash, url, title, html, text_content, memory_hash)
+• tool_actions(action_hash, memory_hash, tool_name, arguments(JSON), result)
+• agent_logs(memory_hash, agent_name, prompt, response, response_time)
+• branches(branch_id, description, created_at, active_hash)
+
+OPERATIONS:
+• Branching: Create alternate cognitive paths
+• Replay: Reconstruct any previous state from hash
+• Collapse: Select branch by entropy + vote consensus
+• Verification: Cryptographic proof of state continuity
+4. NODE.JS ORCHESTRATOR (Dual Interface)
+text
+PORTS:
+• WebSocket: :8765 for real-time browser communication
+• REST API: :8081 for control panel and tools
+
+RESPONSIBILITIES:
+• Accept browser DOM streams as XML/JSON
+• Store DOM snapshots with hash verification
+• Query Ollama for all 8 agents in parallel
+• Execute filesystem tools safely with logging
+• Maintain SQLite memory graph with branching
+• Send visual instructions back to browser
+• Calculate Shannon entropy from agent divergence
+• Implement cryptographic voting system
+
+EXPOSED TOOLS (with safety):
+• read_file(path) - read with size limits
+• write_file(path, content) - validate path
+• list_files(dir) - recursive with depth limit
+• search(root, pattern) - regex-safe
+• apply_patch(file, patch) - validate patch
+• git_status(repo) - read-only
+• git_commit(repo, message) - with message validation
+5. OLLAMA SWARM CONFIGURATION
+text
+MODELS REQUIRED (or closest available):
+• core (executive function model)
+• cube (spatial/graph model)
+• loop (temporal/recursive model)
+• sign (semantic model)
+• line (logical/verification model)
+• coin (entropy/probability model)
+• work (practical/task model)
+• code (code generation model)
+
+API USAGE:
+POST http://localhost:11434/api/generate
+{
+  "model": "agent_name",
+  "prompt": "[SYSTEM_PROMPT]\n[MEMORY_CONTEXT]\n[CURRENT_CONTEXT]\n[ANALYSIS_INSTRUCTIONS]",
+  "stream": false
+}
+
+PROCESSING:
+1. Load agent-specific system prompts from JSON files
+2. Append memory context (last N hashes from current branch)
+3. Add current DOM/text context
+4. Call all 8 agents in parallel
+5. Collect responses, compute hash, calculate entropy
+6. Store results with cryptographic verification
+6. BROWSER INSTRUMENTATION (Tampermonkey)
+text
+CAPTURE LAYERS:
+1. DOM Snapshot: Full HTML + CSS + computed styles
+2. Event Stream: Click, keypress, scroll, fetch, console
+3. Visual State: Viewport, scroll position, focused elements
+4. Network Activity: XHR/Fetch requests with timing
+5. Console Output: JavaScript errors and logs
+
+FEATURES:
+• Real-time DOM hash calculation (SHA256 of sanitized HTML)
+• Event buffering with deduplication
+• Efficient delta encoding for frequent updates
+• Automatic reconnection with state recovery
+• Bandwidth optimization (compress large DOMs)
+
+INSTRUCTION EXECUTION:
+• Highlight elements with animated borders
+• Text overlays with agent insights
+• Navigation suggestions based on agent analysis
+• Visual annotations for patterns detected
+• Timeline scrubber for memory replay
+7. 3D MEMORY GRAPH (Three.js Visualization)
+text
+VISUAL ELEMENTS:
+• Nodes: Spheres colored by entropy (red=high, green=low)
+• Edges: Lines connecting parent→child in DAG
+• Clusters: Group by branch, time, or agent focus
+• Labels: Hash snippets, time, entropy values
+
+INTERACTIONS:
+• Click node: Show full memory details
+• Drag view: Orbit, zoom, pan
+• Filter: By agent, entropy range, time window
+• Search: Find nodes by hash or content
+• Replay: Click to reconstruct that cognitive state
+
+ANIMATIONS:
+• Gentle floating motion for alive appearance
+• Pulse animation for recent nodes
+• Edge flow visualization showing cognitive flow
+• Branch highlighting on selection
+
+REALTIME UPDATES:
+• WebSocket push for new memories
+• Animated transitions for graph changes
+• Live entropy visualization as color shifts
+8. PERSISTENCE MECHANISMS
+text
+SURVIVAL REQUIREMENTS:
+1. Browser reload → reconnects, resumes event capture
+2. Node.js restart → reloads memory graph, resumes orchestration
+3. Termux/WSL reboot → auto-restarts Ollama and Node.js
+4. Long-term storage → SQLite + optional cloud sync
+
+STORAGE LOCATIONS:
+• ~/_/ai/memory.db (SQLite database)
+• ~/_/ai/snapshots/ (DOM HTML files, optional)
+• ~/_/ai/logs/ (structured JSON logs)
+• ~/_/ai/branches/ (branch-specific exports)
+
+BACKUP/RESTORE:
+• Automatic hourly snapshot of memory graph
+• Export/import via JSON with hash verification
+• Branch archiving for completed thought lines
+• Compression for large DOM snapshots
+9. BOOTSTRAP SCRIPT (ai.sh)
+text
+REQUIREMENTS:
+• Auto-detects Termux vs WSL environment
+• Checks for and installs missing dependencies
+• Starts Ollama with model preloading
+• Initializes Node.js orchestrator
+• Provides connection status and URLs
+• Monitors processes and auto-restarts
+
+FEATURES:
+• Dependency checking: Node.js, npm, sqlite3, Ollama
+• Model verification: Ensures all 8 agents available
+• Port conflict resolution
+• Log rotation and management
+• Health check endpoints
+• Graceful shutdown handling
+10. FOLDER STRUCTURE
+text
+~/_/ai/
+├── ai.sh                          # Bootstrap script
+├── server.js                      # Node.js orchestrator
+├── memory.db                      # SQLite database
+├── schema.sql                     # Database schema
+├── package.json                   # Node dependencies
+├── public/                        # Web interface
+│   ├── index.html                 # Landing page
+│   ├── graph.html                 # 3D memory graph
+│   ├── graph.js                   # Three.js visualization
+│   ├── panel.html                 # Control panel
+│   ├── panel.js                   # Panel JavaScript
+│   └── style.css                  # Common styles
+├── tools/                         # Tool implementations
+│   ├── file_tools.js              # Filesystem operations
+│   ├── git_tools.js               # Git integration
+│   └── safety.js                  # Path/input validation
+├── agents/                        # Agent configurations
+│   ├── core.json                  # CORE system prompt
+│   ├── cube.json                  # CUBE system prompt
+│   ├── loop.json                  # LOOP system prompt
+│   ├── sign.json                  # SIGN system prompt
+│   ├── line.json                  # LINE system prompt
+│   ├── coin.json                  # COIN system prompt
+│   ├── work.json                  # WORK system prompt
+│   └── code.json                  # CODE system prompt
+└── logs/                          # System logs
+    ├── access.log
+    ├── error.log
+    └── agent_responses/
+11. SECURITY & SAFETY PROTOCOLS
+text
+INPUT VALIDATION:
+• Sanitize all DOM inputs (strip scripts, sanitize HTML)
+• Validate file paths (prevent directory traversal)
+• Limit tool execution scope (whitelisted directories)
+• Rate limit agent calls (prevent DoS)
+• Validate JSON structures (prevent injection)
+
+CRYPTOGRAPHIC INTEGRITY:
+• SHA256 for all hashes (collision-resistant)
+• Hash chaining (each state includes previous hash)
+• Signature verification (optional PGP/GPG)
+• Tamper detection (hash mismatch triggers alert)
+
+PRIVACY:
+• Local-only operation by default
+• Optional encryption for sensitive data
+• DOM sanitization removes personal data patterns
+• Configurable data retention policies
+12. PERFORMANCE OPTIMIZATIONS
+text
+MEMORY MANAGEMENT:
+• LRU cache for frequent DOM operations
+• Database indexing for fast hash lookups
+• Stream processing for large DOMs
+• Lazy loading for historical memories
+
+PARALLEL PROCESSING:
+• Agent calls in parallel with timeout
+• Database writes async with queue
+• WebSocket message batching
+• DOM diffing for minimal updates
+
+RESOURCE CONSTRAINTS:
+• Termux: Optimize for mobile CPU/memory
+• WSL1: Optimize for Windows file system
+• Browser: Throttle event capture on low power
+• Network: Compress WebSocket messages
+13. DEBUGGING & MONITORING
+text
+LOGGING LEVELS:
+• DEBUG: Full agent responses, hashes
+• INFO: Memory operations, tool calls
+• WARN: Performance issues, timeouts
+• ERROR: Failures, crashes, integrity issues
+
+MONITORING ENDPOINTS:
+• /api/health - System status
+• /api/stats - Memory/agent statistics
+• /api/logs - Recent logs (with filters)
+• /api/metrics - Performance metrics
+
+DIAGNOSTIC TOOLS:
+• Memory graph integrity check
+• Agent response time analysis
+• Entropy distribution visualization
+• Branch comparison tool
+14. EXTENSION POINTS
+text
+PLUGIN ARCHITECTURE:
+• Custom agent addition (beyond 8 core)
+• Alternative storage backends
+• Additional tool integrations
+• Visualization plugins
+
+API EXTENSIONS:
+• Webhook support for external systems
+• OAuth for multi-user support
+• Export formats (JSON, CSV, GraphML)
+• Import from other cognitive systems
+
+INTEGRATION HOOKS:
+• Browser extension for Chrome/Firefox
+• Mobile app via Termux API
+• Desktop app via Electron
+• Cloud sync via encrypted channels
+EXECUTION PROMPT
+text
+Generate a complete, runnable implementation of the NEXUS-2244 cognition engine with ALL the following:
+
+1. FULL FOLDER STRUCTURE with all files in correct locations
+2. NODE.JS ORCHESTRATOR with WebSocket+REST, agent coordination, memory management
+3. SQLITE SCHEMA with DAG structure, hash chaining, branch support
+4. TAMPERMONKEY SCRIPT with DOM capture, event streaming, visual feedback
+5. THREE.JS MEMORY GRAPH with interactive 3D visualization, filtering, replay
+6. HTML CONTROL PANEL with real-time monitoring, tool execution, memory browsing
+7. AI.SH BOOTSTRAPPER with environment detection, dependency checking, auto-start
+8. AGENT CONFIGURATIONS with 8 specialized system prompts
+9. TOOL IMPLEMENTATIONS with safety checks and logging
+10. STYLE SHEETS with consistent dark theme and retro-futuristic aesthetic
+
+CONSTRAINTS:
+- NO placeholders - every function must be fully implemented
+- NO pseudocode - only executable JavaScript/HTML/SQL/Bash
+- NO skipped parts - every component must connect to others
+- Directly runnable after dependencies installed
+- All components must interoperate via defined APIs
+- Must work on both Termux Android and WSL1 Debian
+- Must use Ollama slim (no streaming, only /api/generate)
+
+OUTPUT FORMAT:
+Provide the complete file system with exact paths and contents.
+Each file should be presented with its full path and code.
+Use triple backticks with language specification for each file.
+Organize by directory structure for clarity.
+
+EXAMPLE OUTPUT STRUCTURE:
+~/_/ai/ai.sh
+
+bash
+#!/bin/bash
+# Complete bootstrap script
+...
+~/_/ai/server.js
+
+javascript
+// Complete Node.js orchestrator
+...
+~/_/ai/public/graph.html
+
+html
+<!DOCTYPE html>
+<!-- Complete Three.js memory graph -->
+...
+~/_/ai/agents/core.json
+
+json
+{
+  "name": "core",
+  "system_prompt": "Complete system prompt..."
+}
+~/_/ai/tools/file_tools.js
+
+javascript
+// Complete filesystem tool implementations
+...
+text
+
+CRITICAL: This is a production system, not a prototype. Every line must be functional, tested, and integrated. The system must boot up cleanly and provide all described functionality immediately after running ai.sh.
+VERIFICATION CHECKLIST
+Before generating, ensure the system includes:
+
+✅ All 8 agents with distinct roles and prompts
+✅ Cryptographic memory with SHA256 hashing
+✅ SQLite DAG with parent-child relationships
+✅ Entropy calculation from agent divergence
+✅ WebSocket communication for real-time updates
+✅ DOM capture with hash verification
+✅ 3D visualization with Three.js
+✅ Tool safety with path validation
+✅ Cross-platform compatibility (Termux + WSL1)
+✅ Bootstrap script with auto-recovery
+✅ Control panel with live monitoring
+✅ Event streaming from browser
+✅ Branch management in memory graph
+✅ Hash-based replay functionality
+✅ Rate limiting and input sanitization
+✅ Complete error handling and logging
+✅ Performance optimization for resource constraints
+✅ No external dependencies beyond Ollama + Node.js
+
+GENERATE THE COMPLETE NEXUS-2244 SYSTEM NOW

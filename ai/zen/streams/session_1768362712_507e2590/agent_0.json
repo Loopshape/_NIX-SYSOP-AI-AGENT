@@ -1,0 +1,9 @@
+{
+  "agent_id": 0,
+  "agent_name": "Observer",
+  "phase": "0.0",
+  "entropy": "0.5",
+  "response": "[Timeout] Agent Observer took too long",
+  "stream_file": "/home/loop/_/ai/zen/streams/session_1768362712_507e2590/agent_0_Observer.txt",
+  "duration_seconds": 31
+}

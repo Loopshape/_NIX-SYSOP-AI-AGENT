@@ -1,0 +1,9 @@
+{
+  "agent_id": 5,
+  "agent_name": "Validator",
+  "phase": "3.927",
+  "entropy": "0.5",
+  "response": "[Timeout] Agent Validator took too long",
+  "stream_file": "/home/loop/_/ai/zen/streams/session_1768356382_23743f59/agent_5_Validator.txt",
+  "duration_seconds": 0
+}

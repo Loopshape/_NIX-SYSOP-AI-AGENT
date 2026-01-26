@@ -1,0 +1,45 @@
+(.env.local) loop@LOOPCORE:~/_$ ai
+wal
+WSL Runtime AI Orchestration v3.2
+================================
+Commands:
+  reason "<input>"       – Run 8-Agent cycle. Supports Operators:
+                           "* <task>"      : Recursive batch (all files)
+                           ". <task>"      : Flat batch (current folder)
+                           "+<ext> <task>" : Extension batch (e.g. +py Check)
+                           "- <file>"      : Enhanced file analysis
+                           ": <f1> <f2> ..." : Combined logic refactoring
+  batch <file>           – Process a JSON or Text batch file
+  recall "<query>" [N]   – Search memory
+  stats                  – Show JSON stats
+  cleanup [days]         – Prune old memories
+  export                 – Backup DB
+  agents                 – List agents
+  models                 – List Ollama models
+(.env.local) loop@LOOPCORE:~/_$ ai reason *
+wal
+[INFO] Starting [Cube-Core-Loop-Wave-Sign-Line-Coin-Work] cycle for: _...
+/home/loop/_/ai/ai.sh: line 199: {model:$model, input:$txt}: command not found
+/home/loop/_/ai/ai.sh: line 199: {model:$model, input:$txt}: command not found
+/home/loop/_/ai/ai.sh: line 330: --arg: command not found
+/home/loop/_/ai/ai.sh: line 330: --arg: command not found
+/home/loop/_/ai/ai.sh: line 199: {model:$model, input:$txt}: command not found
+/home/loop/_/ai/ai.sh: line 331: --arg: command not found
+/home/loop/_/ai/ai.sh: line 331: --arg: command not found
+/home/loop/_/ai/ai.sh: line 330: --arg: command not found
+/home/loop/_/ai/ai.sh: line 332: --argjson: command not found
+/home/loop/_/ai/ai.sh: line 333: --argjson: command not found
+/home/loop/_/ai/ai.sh: line 332: --argjson: command not found
+/home/loop/_/ai/ai.sh: line 331: --arg: command not found
+/home/loop/_/ai/ai.sh: line 199: {model:$model, input:$txt}: command not found
+/home/loop/_/ai/ai.sh: line 335: $'{model:$model, prompt:$prompt, stream:false,\n          options:{temperature:$temperature, num_predict:$num_predict}}': command not found
+/home/loop/_/ai/ai.sh: line 332: --argjson: command not found
+/home/loop/_/ai/ai.sh: line 333: --argjson: command not found
+(.env.local) loop@LOOPCORE:~/_$ /home/loop/_/ai/ai.sh: line 333: --argjson: command not found
+/home/loop/_/ai/ai.sh: line 335: $'{model:$model, prompt:$prompt, stream:false,\n          options:{temperature:$temperature, num_predict:$num_predict}}': command not found
+/home/loop/_/ai/ai.sh: line 335: $'{model:$model, prompt:$prompt, stream:false,\n          options:{temperature:$temperature, num_predict:$num_predict}}': command not found
+/home/loop/_/ai/ai.sh: line 330: --arg: command not found
+/home/loop/_/ai/ai.sh: line 331: --arg: command not found
+/home/loop/_/ai/ai.sh: line 332: --argjson: command not found
+/home/loop/_/ai/ai.sh: line 333: --argjson: command not found
+/home/loop/_/ai/ai.sh: line 335: $'{model:$model, prompt:$prompt, stream:false,\n          options:{temperature:$temperature, num_predict:$num_predict}}': command not found

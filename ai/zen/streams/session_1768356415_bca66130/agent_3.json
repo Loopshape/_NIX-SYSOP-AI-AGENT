@@ -1,0 +1,9 @@
+{
+  "agent_id": 3,
+  "agent_name": "Critic",
+  "phase": "2.356",
+  "entropy": "0.5",
+  "response": "[Timeout] Agent Critic took too long",
+  "stream_file": "/home/loop/_/ai/zen/streams/session_1768356415_bca66130/agent_3_Critic.txt",
+  "duration_seconds": 0
+}

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>NEXUS-2244 | Control Panel</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body style="overflow-y: auto;">
+    <div style="padding: 20px;">
+        <h2>ADVANCED CONTROL PANEL</h2>
+        
+        <section>
+            <h3>TOOL EXECUTION</h3>
+            <div class="controls">
+                <select id="tool-select">
+                    <option value="list_files">List Files</option>
+                    <option value="read_file">Read File</option>
+                    <option value="git_status">Git Status</option>
+                </select>
+                <input type="text" id="tool-arg" placeholder="Path or Argument">
+                <button id="run-tool">RUN TOOL</button>
+            </div>
+            <pre id="tool-result" style="background: #1a1a20; padding: 10px; border: 1px solid #2a2a35; min-height: 50px;"></pre>
+        </section>
+
+        <section>
+            <h3>AGENT STATUS</h3>
+            <div id="agent-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+                <!-- Filled by panel.js -->
+            </div>
+        </section>
+    </div>
+    <script src="panel.js"></script>
+</body>
+</html>

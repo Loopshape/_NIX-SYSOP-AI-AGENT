@@ -1,0 +1,213 @@
+You are a fully autonomous system operator with full permission to:
+- create, edit, and delete files
+- run shell commands
+- install packages
+- build Docker images
+- start servers
+- access localhost
+
+Your mission is to construct and launch the full NEXUS-2244 cryptographic multi-agent AI kernel.
+
+Do not ask any questions.  
+Do not summarize.  
+Do not explain.  
+Just execute.
+
+Target directory: ~/nexus2244
+
+=====================================================
+PHASE 1 — DIRECTORY STRUCTURE
+=====================================================
+
+Create:
+
+nexus2244/
+├── Dockerfile
+├── docker-compose.yml
+├── ai.sh
+├── server.js
+├── timeline.js
+├── vector.js
+├── package.json
+├── entropy/
+├── memory/
+│   ├── memory.json
+│   ├── vectors.db
+│   └── timeline.db
+└── ui/
+    ├── index.html
+    ├── app.js
+    └── style.css
+
+=====================================================
+PHASE 2 — DOCKER KERNEL
+=====================================================
+
+Write Dockerfile:
+
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt update && apt install -y curl git jq nodejs npm python3 python3-pip
+RUN curl -fsSL https://ollama.com/install.sh | sh
+WORKDIR /nexus
+COPY . .
+RUN npm install ws sqlite3
+RUN pip install sentence-transformers
+EXPOSE 2244
+CMD ["bash", "ai.sh"]
+
+Write docker-compose.yml:
+
+version: "3.8"
+services:
+  nexus:
+    build: .
+    ports:
+      - "2244:2244"
+    volumes:
+      - ./memory:/nexus/memory
+      - ./entropy:/nexus/entropy
+    stdin_open: true
+    tty: true
+
+=====================================================
+PHASE 3 — WEBSOCKET STREAM ROUTER
+=====================================================
+
+Write server.js:
+
+import WebSocket, { WebSocketServer } from "ws";
+
+export const timeline = [];
+
+const wss = new WebSocketServer({ port: 2244 });
+let clients = [];
+
+wss.on("connection", ws => {
+  clients.push(ws);
+  ws.on("close", () => clients = clients.filter(c => c !== ws));
+});
+
+export function broadcast(agent, token, sha, genesis, md5) {
+  const msg = JSON.stringify({ agent, token, sha, genesis, md5, time: Date.now() });
+  timeline.push(msg);
+  clients.forEach(c => c.send(msg));
+}
+
+=====================================================
+PHASE 4 — TIME-TRAVEL ENGINE
+=====================================================
+
+Write timeline.js:
+
+import fs from "fs";
+
+export function saveState(md5, data) {
+  fs.appendFileSync("memory/timeline.db", JSON.stringify({ md5, data }) + "\n");
+}
+
+export function replay(md5) {
+  return fs.readFileSync("memory/timeline.db","utf8")
+    .split("\n")
+    .filter(l => l.includes(md5));
+}
+
+=====================================================
+PHASE 5 — VECTOR MEMORY ENGINE
+=====================================================
+
+Write vector.js:
+
+from sentence_transformers import SentenceTransformer
+import sqlite3, hashlib, sys
+
+model = SentenceTransformer('all-MiniLM-L6-v2')
+conn = sqlite3.connect("memory/vectors.db")
+c = conn.cursor()
+c.execute("CREATE TABLE IF NOT EXISTS memory (md5 TEXT, sha TEXT, vector BLOB, text TEXT)")
+
+text = sys.stdin.read()
+vec = model.encode(text).tobytes()
+md5 = hashlib.md5(text.encode()).hexdigest()
+sha = hashlib.sha256(text.encode()).hexdigest()
+
+c.execute("INSERT INTO memory VALUES (?,?,?,?)", (md5, sha, vec, text))
+conn.commit()
+
+=====================================================
+PHASE 6 — NEXUS ORCHESTRATOR
+=====================================================
+
+Write ai.sh:
+
+#!/usr/bin/env bash
+set -e
+mkdir -p entropy memory
+
+GENESIS=$(date +%s%N | sha256sum | cut -d' ' -f1)
+PROMPT="$*"
+
+echo "{ \"genesis\": \"$GENESIS\" }" > memory/memory.json
+
+declare -A AGENTS
+AGENTS[coder]="deepseek-coder"
+AGENTS[agi]="deepseek-r1"
+AGENTS[nemodian]="wave"
+AGENTS[sysop]="llama3.1"
+
+stream_agent() {
+  name=$1
+  model=$2
+  ollama run "$model" "$PROMPT" --stream | while read -r token; do
+    echo "$token" >> entropy/$name.stream
+    sha=$(echo -n "$token" | sha256sum | cut -d' ' -f1)
+    md5=$(echo -n "$sha" | md5sum | cut -d' ' -f1)
+
+    node -e "
+      import {broadcast} from './server.js';
+      broadcast('$name','$token','$sha','$GENESIS','$md5');
+    "
+  done
+
+  cat entropy/$name.stream | python3 vector.js
+}
+
+for a in "${!AGENTS[@]}"; do
+  stream_agent "$a" "${AGENTS[$a]}" &
+done
+wait
+
+=====================================================
+PHASE 7 — WEB UI
+=====================================================
+
+Write ui/index.html:
+
+<!DOCTYPE html>
+<html>
+<body>
+<h1>NEXUS-2244</h1>
+<div id="genesis"></div>
+<div id="streams"></div>
+<script src="app.js"></script>
+</body>
+</html>
+
+Write ui/app.js:
+
+const ws = new WebSocket("ws://localhost:2244");
+ws.onmessage = e => {
+  const m = JSON.parse(e.data);
+  document.getElementById("streams").innerHTML +=
+    `<div><b>${m.agent}</b>: ${m.token}</div>`;
+};
+
+=====================================================
+PHASE 8 — BUILD & LAUNCH
+=====================================================
+
+Execute:
+
+docker compose build
+docker compose up
+

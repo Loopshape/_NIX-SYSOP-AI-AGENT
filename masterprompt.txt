@@ -1,0 +1,117 @@
+══════════════════════════════════════
+PHASE 9 — VISUAL MULTIVERSE + ENTROPY
+══════════════════════════════════════
+
+Extend ui/index.html and timeline.js.
+
+The UI must show:
+
+1. Timeline Tree  
+Each thought hash is a node.
+parent_hash creates edges.
+Branches are drawn as a tree.
+
+2. Entropy Heatmap  
+Each node color is:
+- green = low entropy (coherent)
+- yellow = medium
+- red = high entropy (uncertain)
+
+Use Three.js to render a 3D branching tree.
+Use GSAP to animate branch growth.
+
+Nodes are received via WebSocket messages:
+{
+  hash,
+  parent,
+  agent,
+  entropy,
+  summary
+}
+
+══════════════════════════════════════
+PHASE 10 — GOAL ENGINE
+══════════════════════════════════════
+
+Add a goals table to SQLite:
+
+goals(id, description, priority, last_update, success_score)
+
+Implement:
+- create_goal(text)
+- score_goal(goal, thoughts)
+- promote goals with high score
+- drop goals with low score
+
+If no user input:
+- NEXUS selects highest priority goal
+- creates a question to advance it
+- runs the agent cycle
+
+This is autonomous goal pursuit, not free will.
+
+══════════════════════════════════════
+PHASE 11 — RECURSIVE SELF-IMPROVEMENT
+══════════════════════════════════════
+
+After each cycle:
+
+- summarize best solution
+- store as “skill” in memory
+- link it to recall graph
+
+If a future prompt matches a stored skill:
+- inject the skill into the prompt
+
+This is iterative refinement, not self-awareness.
+
+══════════════════════════════════════
+PHASE 12 — HASHED LINEAGE TRACKING
+══════════════════════════════════════
+
+Every thought must include:
+
+hash = SHA256(parent_hash + agent + output)
+md5  = MD5(output)
+
+Store both.
+
+Use SHA256 for identity & time.
+Use MD5 for fast similarity clustering.
+
+══════════════════════════════════════
+PHASE 13 — OLLAMA POOL MODULATION
+══════════════════════════════════════
+
+Use 2π / N agent rotation.
+
+If N agents:
+phase = (cycle_index mod N)
+
+Each cycle:
+- rotate which agent speaks first
+- this prevents dominance
+
+══════════════════════════════════════
+PHASE 14 — MIND FILES
+══════════════════════════════════════
+
+If these files exist in ~/ai:
+- mindmap.txt
+- mindset.txt
+- mindbend.txt
+
+Load them at startup and inject them into:
+- recall graph
+- agent prompts
+- goal formation
+
+They are treated as long-term priors.
+
+══════════════════════════════════════
+FINAL EXTENSION
+══════════════════════════════════════
+
+When everything is complete:
+print: "NEXUS COGNITIVE STACK READY"
+

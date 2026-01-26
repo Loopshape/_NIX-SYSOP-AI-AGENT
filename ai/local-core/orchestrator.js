@@ -23,7 +23,7 @@ fs.mkdirSync(PROJECT_FOLDER, { recursive: true });
 log(`Project folder: ${PROJECT_FOLDER}`);
 
 // AGENTS
-const AGENTS = ["core", "loop", "wave", "coin", "code"];
+const AGENTS = ["loop", "line", "code", "cube", "work", "core", "sign", "coin"];
 
 async function runAgent(agent, prompt) {
   const agentJs = path.join(AGENTS_DIR, `${agent}.js`);

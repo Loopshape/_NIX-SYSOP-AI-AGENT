@@ -1,0 +1,1 @@
+/home/loop/_/ai/ai.sh: line 82: MAGENTA: unbound variable

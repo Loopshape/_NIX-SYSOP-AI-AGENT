@@ -8,7 +8,7 @@
 ### PATHS + ENV
 ############################################
 export OLLAMA_API_URL="http://127.0.0.1:11434/api"
-export AGENTS=("CUBE" "CORE" "LOOP" "LINE" "WAVE" "COIN" "CODE" "WORK")
+export AGENTS=("LOOP" "LINE" "CODE" "CUBE" "WORK" "CORE" "SIGN" "COIN")
 
 LOGROOT="$HOME/.ollama/log"
 mkdir -p "$LOGROOT"
