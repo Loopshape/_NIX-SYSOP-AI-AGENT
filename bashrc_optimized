@@ -1,17 +1,28 @@
-# ~/.bashrc: Executed by bash(1) for non-login shells.
-# Refactored for WSL1 Debian + Ollama Slim-Edition + 2Pi/8-Agents (NEXUS/AI)
+# ~/.bashrc: Optimized for Nexus-AI Workflow
+# Integrates WSL1 Debian + Ollama + 2Pi/8-Agents
 
 # =============================================================================
-# 1. INTERACTIVE CHECK
+# 1. ENVIRONMENT & KEYS
+# =============================================================================
+export GEMINI_API_KEY="AIzaSyAjRGROgF9dCuSZ8StFS8PMfOd0f3l-iec"
+export GEMINI_PROJECT_ID="gen-lang-client-0866252427"
+export OLLAMA_HOST="http://localhost:11434"
+export OLLAMA_KEEP_ALIVE="10m"
+export OLLAMA_MAX_LOADED_MODELS="1"
+
+# NEXUS Paths
+export NEXUS_ROOT="/home/loop/_"
+export AI_DIR="$NEXUS_ROOT/ai"
+export PATH="$PATH:$AI_DIR:$HOME/ollama"
+
+# =============================================================================
+# 2. INTERACTIVE CHECK & HISTORY
 # =============================================================================
 case $- in
     *i*) ;;
-      *) return;;
+      *) return ;;
 esac
 
-# =============================================================================
-# 2. HISTORY & WINDOW SETTINGS
-# =============================================================================
 HISTCONTROL=ignoreboth
 shopt -s histappend
 HISTSIZE=5000
@@ -19,7 +30,7 @@ HISTFILESIZE=10000
 shopt -s checkwinsize
 
 # =============================================================================
-# 3. PROMPT & COLOR SETTINGS
+# 3. PROMPT & COLORS
 # =============================================================================
 force_color_prompt=yes
 if [ -n "$force_color_prompt" ]; then
@@ -31,9 +42,9 @@ if [ -n "$force_color_prompt" ]; then
 fi
 
 if [ "$color_prompt" = yes ]; then
-    PS1='${debian_chroot:+($debian_chroot)}\[\033[01;32m\]\u@\h\[\033[00m\]: \[\033[01;34m\]\w\[\033[00m\]\$ '
+    PS1='${debian_chroot:+(debian_chroot)}[\033[01;32m]\u@\h[\033[00m]:[\033[01;34m]\w[\033[00m]\$ '
 else
-    PS1='${debian_chroot:+($debian_chroot)}\u@\h:\w\$ '
+    PS1='${debian_chroot:+(debian_chroot)}\u@\h:\w\$ '
 fi
 unset color_prompt force_color_prompt
 
@@ -47,41 +58,58 @@ if [ -x /usr/bin/dircolors ]; then
 fi
 
 # =============================================================================
-# 4. EXTERNAL TOOLS (Brew, NVM)
+# 4. EXTERNAL TOOLS (Brew, NVM, SSH)
 # =============================================================================
 # Linuxbrew
 if [ -d "/home/linuxbrew/.linuxbrew" ]; then
     eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 
-# NVM (Node Version Manager)
+# NVM
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 
-# =============================================================================
-# 5. OLLAMA STARTUP & OPTIMIZATION (WSL1)
-# =============================================================================
-export OLLAMA_HOST="http://localhost:11434"
-export OLLAMA_KEEP_ALIVE="10m"
-export OLLAMA_MAX_LOADED_MODELS="1"
-
-# Check if Ollama is running
-if ! pgrep -x "ollama" > /dev/null; then
-    echo "[System] Starting Ollama (Slim-Edition)..."
-    mkdir -p "$HOME/.gemini/tmp"
-    nohup ollama serve > "$HOME/.gemini/tmp/ollama.log" 2>&1 &
-    sleep 1
+# SSH Agent
+if [ -f "$HOME/.ssh/auto-ssh-agent.sh" ]; then
+    source "$HOME/.ssh/auto-ssh-agent.sh"
+elif [ -x "$(command -v ssh-agent)" ]; then
+    eval $(ssh-agent -s) > /dev/null
 fi
 
 # =============================================================================
-# 6. NEXUS-AI WORKFLOW OPTIMIZATION
+# 5. OLLAMA & AGENT DAEMONS
 # =============================================================================
-export AI_DIR="$HOME/_/ai"
-export NEXUS_ROOT="$HOME/_"
-export PATH="$PATH:$AI_DIR"
+ollama_check() { curl -sf "$OLLAMA_HOST/api/tags" >/dev/null; }
 
-# Core Aliases
+start_ollama() {
+    if ! ollama_check; then
+        echo "[System] Starting Ollama (Slim)..."
+        mkdir -p "$HOME/.gemini/tmp"
+        nohup ollama serve > "$HOME/.gemini/tmp/ollama.log" 2>&1 &
+        sleep 1
+    fi
+}
+start_ollama
+
+monitor_agents() {
+    nohup bash -c "
+        while true; do
+            for agent in CUBE CORE LOOP LINE WAVE COIN CODE WORK; do
+                pidfile=\"$AI_DIR/logs/\$agent.pid\"
+                if [ -f "\$pidfile" ] && ! ps -p \"\\\$(cat \"\$pidfile\")\" >/dev/null 2>&1; then
+                    echo \"[WARN] Agent \$agent down\"
+                fi
+            done
+            sleep 60
+        done
+    " &>/dev/null &
+}
+monitor_agents
+
+# =============================================================================
+# 6. NEXUS-AI ALIASES & HELPERS
+# =============================================================================
 alias ai="$AI_DIR/ai.sh"
 alias zen="$AI_DIR/ai.sh"
 alias nx-sys="$NEXUS_ROOT/nexus-system.sh"
@@ -91,19 +119,16 @@ alias nx-init="$NEXUS_ROOT/gemini-cli.installer.sh"
 alias nx-logs="tail -f $HOME/.gemini/tmp/ollama.log"
 alias nx-db="sqlite3 $NEXUS_ROOT/memory.db"
 alias nx-scan="ai reason \"scan all recursive folders of this repository for having a complete system-scan check\""
-
-# Git Integrity Helper
 alias nx-git-fix="git reflog expire --expire=now --all && git gc --prune=now && git fsck"
 
-# Status function
 ai_status() {
-    echo "=== NEXUS-AI System Status ==="
-    echo "Ollama: $(pgrep -x ollama >/dev/null && echo 'Active' || echo 'Inactive')"
-    echo "Agent Script: $(which ai 2>/dev/null || echo 'ai.sh in '$AI_DIR)"
-    echo "Memory DB: $([ -f $NEXUS_ROOT/memory.db ] && echo 'Present' || echo 'Missing')"
+    echo "=== NEXUS-AI Status ==="
+    echo "Ollama: $(ollama_check && echo 'Active' || echo 'Inactive')"
+    echo "Agents: $(ls $AI_DIR/logs/*.pid 2>/dev/null | wc -l) active"
+    echo "Root:   $NEXUS_ROOT"
 }
 
-# Auto-complete for 'ai' command
+# Auto-complete
 if [ -f "$AI_DIR/ai.sh" ]; then
     complete -W "reason refactor batch scan analyze files recall stats cleanup export agents models help" ai
 fi
