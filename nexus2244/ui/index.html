@@ -1,10 +1,654 @@
 <!DOCTYPE html>
-<html>
-<head><title>NEXUS-2244</title></head>
-<body style="background:#000; color:#0f0; font-family:monospace;">
-<h1>NEXUS-2244 STREAM</h1>
-<div id="genesis" style="border-bottom: 1px solid #0f0; padding-bottom:10px;"></div>
-<div id="streams" style="padding-top:10px;"></div>
-<script src="app.js"></script>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXUS-2244 Cognitive Kernel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0a0a;
+            color: #00ff00;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .container {
+            display: grid;
+            grid-template-columns: 300px 1fr 300px;
+            grid-template-rows: 60px 1fr 200px;
+            height: 100vh;
+            gap: 1px;
+            background: #1a1a1a;
+        }
+        
+        .header {
+            grid-column: 1 / -1;
+            background: #111;
+            border-bottom: 1px solid #00ff00;
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: #00ff00;
+            text-shadow: 0 0 10px #00ff00;
+        }
+        
+        .status {
+            display: flex;
+            gap: 20px;
+            font-size: 14px;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-online { background: #00ff00; box-shadow: 0 0 10px #00ff00; }
+        .status-offline { background: #ff0000; }
+        
+        .sidebar {
+            background: #111;
+            border-right: 1px solid #00ff00;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        .main {
+            background: #0a0a0a;
+            padding: 20px;
+            overflow-y: auto;
+            position: relative;
+        }
+        
+        .visualization {
+            background: #111;
+            border-left: 1px solid #00ff00;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        .footer {
+            grid-column: 1 / -1;
+            background: #111;
+            border-top: 1px solid #00ff00;
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .prompt-input {
+            flex: 1;
+            background: transparent;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            margin-right: 10px;
+        }
+        
+        .send-btn {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .stream-container {
+            margin-top: 20px;
+        }
+        
+        .stream-entry {
+            background: #111;
+            border: 1px solid #222;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+        
+        .agent-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-right: 10px;
+            background: #222;
+        }
+        
+        .token {
+            margin: 5px 0;
+            line-height: 1.4;
+        }
+        
+        .hash {
+            font-size: 11px;
+            color: #666;
+            font-family: monospace;
+            word-break: break-all;
+        }
+        
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .node {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: black;
+            font-weight: bold;
+            font-size: 12px;
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+        
+        .node:hover {
+            transform: scale(1.2);
+            z-index: 100;
+        }
+        
+        .heatmap {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(20px, 1fr));
+            gap: 2px;
+            margin-top: 20px;
+        }
+        
+        .heatmap-cell {
+            width: 20px;
+            height: 20px;
+            border-radius: 2px;
+            cursor: pointer;
+        }
+        
+        .model-selector {
+            background: #111;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 5px;
+            width: 100%;
+            margin-top: 10px;
+        }
+        
+        .model-info {
+            font-size: 11px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .agent-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .agent-card {
+            background: #222;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+            border: 1px solid transparent;
+            transition: all 0.3s;
+        }
+        
+        .agent-card.active {
+            border-color: #00ff00;
+            background: #1a2a1a;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">NEXUS-2244</div>
+            <div class="status">
+                <span><span class="status-indicator status-online"></span> WebSocket</span>
+                <span><span class="status-indicator status-online"></span> Ollama</span>
+                <span><span class="status-indicator status-online"></span> Agents</span>
+                <span id="timestamp">--:--:--</span>
+            </div>
+        </div>
+        
+        <div class="sidebar">
+            <h3>🤖 Agents</h3>
+            <div class="agent-grid" id="agentGrid"></div>
+            
+            <h3 style="margin-top: 20px;">🎯 Goals</h3>
+            <div id="goalsList"></div>
+            
+            <h3 style="margin-top: 20px;">🧠 Models</h3>
+            <select class="model-selector" id="modelSelector">
+                <option value="">Loading models...</option>
+            </select>
+            <div class="model-info" id="modelInfo"></div>
+        </div>
+        
+        <div class="main">
+            <h3>🌐 Stream Output</h3>
+            <div id="streams" class="stream-container"></div>
+        </div>
+        
+        <div class="visualization">
+            <h3>🌳 Timeline Tree</h3>
+            <div id="treeContainer" style="position: relative; height: 300px; margin-bottom: 20px;">
+                <canvas id="treeCanvas" width="800" height="300"></canvas>
+            </div>
+            
+            <h3>🔥 Entropy Heatmap</h3>
+            <div id="heatmap" class="heatmap"></div>
+            
+            <h3 style="margin-top: 20px;">📊 Stats</h3>
+            <div id="stats">
+                <div>Genesis Hash: <span id="genesisHash" class="hash">Loading...</span></div>
+                <div>Active Agents: <span id="activeAgents">0</span></div>
+                <div>Total Tokens: <span id="totalTokens">0</span></div>
+                <div>Average Entropy: <span id="avgEntropy">0.00</span></div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <input type="text" 
+                   class="prompt-input" 
+                   id="promptInput" 
+                   placeholder="Enter your prompt... (Press Enter to send)"
+                   autocomplete="off">
+            <button class="send-btn" id="sendBtn">SEND</button>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let ws = null;
+        let genesisHash = '';
+        let agents = new Map();
+        let streams = [];
+        let treeNodes = [];
+        let selectedModel = '';
+        
+        // Initialize WebSocket
+        function initWebSocket() {
+            ws = new WebSocket('ws://' + window.location.hostname + ':2244');
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                updateStatus('ws', true);
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'timeline_init') {
+                        // Initial timeline data
+                        streams = data.data;
+                        renderStreams();
+                    } else if (data.type === 'token') {
+                        // New token from agent
+                        handleToken(data);
+                    }
+                } catch (e) {
+                    console.error('Parse error:', e);
+                }
+            };
+            
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                updateStatus('ws', false);
+                // Attempt reconnect after 3 seconds
+                setTimeout(initWebSocket, 3000);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateStatus('ws', false);
+            };
+        }
+        
+        // Handle incoming token
+        function handleToken(tokenData) {
+            streams.push(tokenData);
+            if (streams.length > 1000) streams.shift();
+            
+            // Update agent stats
+            if (!agents.has(tokenData.agent)) {
+                agents.set(tokenData.agent, {
+                    count: 0,
+                    tokens: 0,
+                    entropy: 0
+                });
+            }
+            
+            const agent = agents.get(tokenData.agent);
+            agent.count++;
+            agent.tokens += tokenData.token.length;
+            agent.entropy = tokenData.entropy || 0;
+            
+            // Set genesis if not set
+            if (!genesisHash && tokenData.genesis) {
+                genesisHash = tokenData.genesis;
+                document.getElementById('genesisHash').textContent = genesisHash.substring(0, 16) + '...';
+            }
+            
+            // Render updates
+            renderStreams();
+            updateStats();
+            updateTree(tokenData);
+            updateHeatmap();
+            updateAgentGrid();
+        }
+        
+        // Render streams
+        function renderStreams() {
+            const container = document.getElementById('streams');
+            const recent = streams.slice(-50).reverse();
+            
+            container.innerHTML = recent.map(token => `
+                <div class="stream-entry">
+                    <div>
+                        <span class="agent-tag" style="background: ${getAgentColor(token.agent)}">
+                            ${token.agent.toUpperCase()}
+                        </span>
+                        <span class="token">${escapeHtml(token.token)}</span>
+                    </div>
+                    <div class="hash">
+                        MD5: ${token.md5?.substring(0, 8)}... | 
+                        SHA: ${token.sha256?.substring(0, 8)}... |
+                        E: ${(token.entropy || 0).toFixed(3)}
+                    </div>
+                </div>
+            `).join('');
+            
+            // Auto-scroll to top
+            container.scrollTop = 0;
+        }
+        
+        // Update statistics
+        function updateStats() {
+            let totalTokens = 0;
+            let totalEntropy = 0;
+            
+            agents.forEach(agent => {
+                totalTokens += agent.tokens;
+                totalEntropy += agent.entropy;
+            });
+            
+            const avgEntropy = agents.size > 0 ? totalEntropy / agents.size : 0;
+            
+            document.getElementById('activeAgents').textContent = agents.size;
+            document.getElementById('totalTokens').textContent = totalTokens;
+            document.getElementById('avgEntropy').textContent = avgEntropy.toFixed(3);
+        }
+        
+        // Update tree visualization
+        function updateTree(tokenData) {
+            const canvas = document.getElementById('treeCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Add node
+            treeNodes.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                agent: tokenData.agent,
+                hash: tokenData.md5,
+                entropy: tokenData.entropy || 0
+            });
+            
+            // Keep only recent nodes
+            if (treeNodes.length > 100) treeNodes.shift();
+            
+            // Draw connections
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 1;
+            
+            for (let i = 1; i < treeNodes.length; i++) {
+                ctx.beginPath();
+                ctx.moveTo(treeNodes[i-1].x, treeNodes[i-1].y);
+                ctx.lineTo(treeNodes[i].x, treeNodes[i].y);
+                ctx.stroke();
+            }
+            
+            // Draw nodes
+            treeNodes.forEach((node, i) => {
+                const radius = 5 + (node.entropy * 10);
+                const color = getEntropyColor(node.entropy);
+                
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw agent label
+                ctx.fillStyle = '#00ff00';
+                ctx.font = '10px monospace';
+                ctx.fillText(node.agent.substring(0, 3), node.x - 5, node.y - radius - 5);
+            });
+        }
+        
+        // Update heatmap
+        function updateHeatmap() {
+            const container = document.getElementById('heatmap');
+            const recent = streams.slice(-100);
+            
+            if (recent.length === 0) return;
+            
+            // Create 10x10 grid
+            const gridSize = 10;
+            container.innerHTML = '';
+            
+            for (let i = 0; i < gridSize * gridSize; i++) {
+                const token = recent[i % recent.length];
+                const entropy = token ? (token.entropy || 0) : 0;
+                
+                const cell = document.createElement('div');
+                cell.className = 'heatmap-cell';
+                cell.style.backgroundColor = getEntropyColor(entropy);
+                cell.title = `Entropy: ${entropy.toFixed(3)}`;
+                
+                container.appendChild(cell);
+            }
+        }
+        
+        // Update agent grid
+        function updateAgentGrid() {
+            const container = document.getElementById('agentGrid');
+            const agentCards = [];
+            
+            agents.forEach((stats, agentName) => {
+                const color = getAgentColor(agentName);
+                const entropy = stats.entropy.toFixed(3);
+                
+                agentCards.push(`
+                    <div class="agent-card">
+                        <div style="font-weight: bold; color: ${color}">${agentName.toUpperCase()}</div>
+                        <div style="font-size: 11px; margin-top: 5px;">
+                            Tokens: ${stats.tokens}<br>
+                            Entropy: ${entropy}
+                        </div>
+                    </div>
+                `);
+            });
+            
+            container.innerHTML = agentCards.join('');
+        }
+        
+        // Load models from API
+        async function loadModels() {
+            try {
+                const response = await fetch('http://' + window.location.hostname + ':7070/api/models');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const selector = document.getElementById('modelSelector');
+                    const info = document.getElementById('modelInfo');
+                    
+                    selector.innerHTML = '<option value="">Select a model...</option>' +
+                        data.models.map(model => `
+                            <option value="${model.name}">
+                                ${model.name} (${model.details?.family || 'unknown'})
+                            </option>
+                        `).join('');
+                    
+                    selector.onchange = (e) => {
+                        const modelName = e.target.value;
+                        const model = data.models.find(m => m.name === modelName);
+                        
+                        if (model) {
+                            selectedModel = modelName;
+                            info.innerHTML = `
+                                Digest: ${model.digest?.substring(0, 16)}...<br>
+                                Family: ${model.details?.family || 'N/A'}<br>
+                                Modified: ${new Date(model.details?.modified_at).toLocaleDateString()}
+                            `;
+                        }
+                    };
+                    
+                    updateStatus('ollama', true);
+                }
+            } catch (error) {
+                console.error('Failed to load models:', error);
+                updateStatus('ollama', false);
+            }
+        }
+        
+        // Send prompt
+        async function sendPrompt() {
+            const input = document.getElementById('promptInput');
+            const prompt = input.value.trim();
+            
+            if (!prompt) return;
+            
+            // Add to streams
+            streams.push({
+                agent: 'USER',
+                token: prompt,
+                timestamp: Date.now()
+            });
+            
+            renderStreams();
+            
+            // Send to API
+            try {
+                const response = await fetch('http://' + window.location.hostname + ':7070/api/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        agent: selectedModel ? null : 'sysop',
+                        model: selectedModel || null,
+                        stream: true
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'streaming') {
+                    console.log('Streaming started:', data);
+                }
+            } catch (error) {
+                console.error('API error:', error);
+            }
+            
+            // Clear input
+            input.value = '';
+            input.focus();
+        }
+        
+        // Utility functions
+        function getAgentColor(agent) {
+            const colors = {
+                coder: '#ff6b6b',
+                agi: '#4ecdc4',
+                nemodian: '#45b7d1',
+                sysop: '#96ceb4',
+                cube: '#feca57',
+                core: '#ff9ff3',
+                loop: '#54a0ff',
+                line: '#5f27cd',
+                wave: '#00d2d3',
+                coin: '#ff9f43',
+                code: '#48dbfb',
+                work: '#1dd1a1',
+                user: '#ffffff'
+            };
+            return colors[agent] || '#666666';
+        }
+        
+        function getEntropyColor(entropy) {
+            // Green (low entropy) -> Yellow -> Red (high entropy)
+            if (entropy < 0.3) return '#00ff00';
+            if (entropy < 0.6) return '#ffff00';
+            return '#ff0000';
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function updateStatus(type, online) {
+            const indicator = document.querySelector(`.status-${type}`);
+            if (indicator) {
+                indicator.className = `status-indicator status-${online ? 'online' : 'offline'}`;
+            }
+        }
+        
+        // Initialize
+        function init() {
+            // Update timestamp
+            setInterval(() => {
+                document.getElementById('timestamp').textContent = 
+                    new Date().toLocaleTimeString();
+            }, 1000);
+            
+            // Initialize WebSocket
+            initWebSocket();
+            
+            // Load models
+            loadModels();
+            
+            // Set up event listeners
+            document.getElementById('sendBtn').addEventListener('click', sendPrompt);
+            document.getElementById('promptInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendPrompt();
+            });
+            
+            // Focus input
+            document.getElementById('promptInput').focus();
+        }
+        
+        // Start everything
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
 </body>
 </html>

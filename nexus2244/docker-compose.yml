@@ -4,8 +4,14 @@ services:
     build: .
     ports:
       - "2244:2244"
+      - "7070:7070"
     volumes:
       - ./memory:/nexus/memory
       - ./entropy:/nexus/entropy
+      - ./ui:/nexus/ui
     stdin_open: true
     tty: true
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - NEXUS_VERSION=2244
+    restart: unless-stopped

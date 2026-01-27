@@ -1,0 +1,3128 @@
+I'll create a comprehensive refactoring that enhances multi-agent interactions, implements a robust Ollama API bridge, and adds the requested features. This will be a multi-file solution.
+
+1. Enhanced Multi-Agent Orchestration System (v5.0)
+First, let me create the enhanced bash orchestration system with improved agent interactions:
+
+bash
+#!/usr/bin/env bash
+# =============================================================================
+#  WSL Runtime AI Orchestration System – v5.0 (Enhanced Agent Interactions)
+# =============================================================================
+#  New Features:
+#   • Enhanced multi-agent communication pipeline
+#   • Context-aware agent execution with shared memory
+#   • Direct Ollama API integration with fallback
+#   • Agent collaboration protocols
+#   • Result synthesis from multiple agents
+# =============================================================================
+
+set -euo pipefail
+IFS=$'\n\t'
+
+# -------------------------------------------------------------------------
+#   0️⃣  Configuration & Constants
+# -------------------------------------------------------------------------
+
+# Base directories
+readonly BASE_DIR="${HOME}/_/ai/.db"
+readonly AI_DIR="${HOME}/_/ai"
+readonly DB_FILE="${BASE_DIR}/ai_memory.db"
+readonly LOG_FILE="${BASE_DIR}/ai_system.log"
+readonly CONFIG_FILE="${BASE_DIR}/agent_config.json"
+
+# Core constants
+readonly OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
+readonly OLLAMA_MODEL="${OLLAMA_MODEL:-llama3}"
+readonly EMBED_MODEL="${EMBED_MODEL:-$OLLAMA_MODEL}"
+readonly GEMINI_API_KEY="${GEMINI_API_KEY:-}"
+readonly MAX_CONCURRENT_AGENTS="${MAX_CONCURRENT_AGENTS:-3}"
+readonly AGENT_TIMEOUT="${AGENT_TIMEOUT:-30}"
+
+# Agent definitions with enhanced roles
+declare -A AGENT_ROLES=(
+    ["CUBE"]="Structural Analyzer - Examines architecture and components"
+    ["CORE"]="Logic & Reasoning - Evaluates logical consistency and truth"
+    ["LOOP"]="Iterative Optimizer - Identifies patterns and optimizations"
+    ["WAVE"]="Flow & Dynamics - Analyzes trends and variability"
+    ["SIGN"]="Semiotic Interpreter - Decodes symbols and meanings"
+    ["LINE"]="Linear Processor - Connects sequences and progressions"
+    ["COIN"]="Value Assessor - Evaluates cost, risk, and probability"
+    ["WORK"]="Action Executor - Implements and operationalizes insights"
+    ["CODE"]="Code Specialist - Transforms insights into executable code"
+    ["SYNC"]="Synchronizer - Coordinates multi-agent collaboration"
+)
+
+# Agent communication matrix (who can receive from whom)
+declare -A AGENT_COMMUNICATION=(
+    ["CODE"]="CUBE LOOP SIGN LINE WORK"
+    ["WORK"]="CUBE CORE LOOP LINE COIN"
+    ["SYNC"]="CUBE CORE LOOP WAVE SIGN LINE COIN WORK CODE"
+)
+
+# -------------------------------------------------------------------------
+#   1️⃣  Enhanced Logging
+# -------------------------------------------------------------------------
+log_message() {
+    local level="$1" message="$2" agent="${3:-SYSTEM}"
+    local ts
+    ts=$(date '+%Y-%m-%d %H:%M:%S.%3N')
+    
+    # Color coding by agent type
+    local color="${NC}"
+    case "$agent" in
+        CODE) color="${GREEN}" ;;
+        WORK) color="${YELLOW}" ;;
+        SYNC) color="${CYAN}" ;;
+        CUBE|CORE|LOOP|WAVE|SIGN|LINE|COIN) color="${BLUE}" ;;
+        *) color="${NC}" ;;
+    esac
+    
+    printf "${color}[%s]${NC} [%s] %s\n" "$agent" "$level" "$message" >> "$LOG_FILE"
+    
+    # Console output for important messages
+    case "$level" in
+        ERROR|WARN|AGENT_COLLAB)
+            printf "${color}[%s]${NC} [%s] %s\n" "$agent" "$level" "$message"
+            ;;
+    esac
+}
+
+# -------------------------------------------------------------------------
+#   2️⃣  Ollama API Bridge with Enhanced Error Handling
+# -------------------------------------------------------------------------
+ollama_query() {
+    local prompt="$1"
+    local model="${2:-$OLLAMA_MODEL}"
+    local options="${3:-}"
+    local stream="${4:-false}"
+    
+    local payload
+    payload=$(jq -n \
+        --arg model "$model" \
+        --arg prompt "$prompt" \
+        --argjson stream "$stream" \
+        --argjson options "$options" \
+        '{
+            model: $model,
+            prompt: $prompt,
+            stream: $stream,
+            options: ($options // {})
+        }')
+    
+    local response error_msg http_code
+    local timeout=30
+    
+    # Try Ollama API
+    response=$(curl -s \
+        --max-time "$timeout" \
+        --connect-timeout 10 \
+        -H "Content-Type: application/json" \
+        -d "$payload" \
+        "${OLLAMA_HOST}/api/generate" 2>&1) || true
+    
+    http_code=$(echo "$response" | grep -o 'HTTP/[0-9.]* [0-9]*' | tail -1 | awk '{print $2}')
+    
+    if [[ -n "$http_code" && "$http_code" -eq 200 ]]; then
+        echo "$response" | jq -r '.response // empty'
+        return 0
+    else
+        # Analyze error type
+        if [[ "$response" == *"Connection refused"* ]] || [[ "$response" == *"Failed to connect"* ]]; then
+            error_msg="Ollama connection refused - service may not be running"
+        elif [[ "$response" == *"timed out"* ]]; then
+            error_msg="Ollama request timed out after ${timeout}s"
+        elif [[ "$response" == *"model not found"* ]]; then
+            error_msg="Model '$model' not found in Ollama"
+        elif [[ -n "$http_code" ]]; then
+            error_msg="Ollama HTTP error: $http_code"
+        else
+            error_msg="Unknown Ollama error"
+        fi
+        
+        log_message "ERROR" "Ollama query failed: $error_msg" "API_BRIDGE"
+        echo "__OLLAMA_ERROR__:$error_msg"
+        return 1
+    fi
+}
+
+# -------------------------------------------------------------------------
+#   3️⃣  Gemini Fallback
+# -------------------------------------------------------------------------
+gemini_fallback() {
+    local prompt="$1"
+    local model="${2:-gemini-pro}"
+    
+    if [[ -z "$GEMINI_API_KEY" ]]; then
+        log_message "ERROR" "No Gemini API key available for fallback" "FALLBACK"
+        echo "__FALLBACK_ERROR__:No API keys available"
+        return 1
+    fi
+    
+    local payload
+    payload=$(jq -n \
+        --arg model "$model" \
+        --arg prompt "$prompt" \
+        '{
+            contents: [{
+                parts: [{
+                    text: $prompt
+                }]
+            }]
+        }')
+    
+    local response
+    response=$(curl -s \
+        -H "Content-Type: application/json" \
+        -H "x-goog-api-key: $GEMINI_API_KEY" \
+        -d "$payload" \
+        "https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent" 2>&1)
+    
+    if echo "$response" | jq -e '.candidates[0].content.parts[0].text' >/dev/null 2>&1; then
+        echo "$response" | jq -r '.candidates[0].content.parts[0].text'
+        log_message "INFO" "Successfully fell back to Gemini API" "FALLBACK"
+        return 0
+    else
+        log_message "ERROR" "Gemini fallback also failed" "FALLBACK"
+        echo "__FALLBACK_ERROR__:Gemini API request failed"
+        return 1
+    fi
+}
+
+# -------------------------------------------------------------------------
+#   4️⃣  Smart API Router with Fallback
+# -------------------------------------------------------------------------
+query_ai() {
+    local prompt="$1"
+    local model="${2:-}"
+    local options="${3:-}"
+    local force_fallback="${4:-false}"
+    
+    # Default options if not provided
+    if [[ -z "$options" ]]; then
+        options='{"temperature": 0.7, "num_predict": 512}'
+    fi
+    
+    # Check if we should force fallback
+    if [[ "$force_fallback" == "true" ]]; then
+        log_message "WARN" "Forcing fallback to Gemini (bypassing Ollama)" "API_ROUTER"
+        gemini_fallback "$prompt" "${model:-gemini-pro}"
+        return $?
+    fi
+    
+    # Try Ollama first
+    local ollama_response
+    if ollama_response=$(ollama_query "$prompt" "${model:-$OLLAMA_MODEL}" "$options"); then
+        if [[ "$ollama_response" != "__OLLAMA_ERROR__"* ]]; then
+            echo "$ollama_response"
+            return 0
+        fi
+    fi
+    
+    # Extract error message if present
+    local error_msg="${ollama_response#__OLLAMA_ERROR__:}"
+    
+    # Fallback to Gemini
+    log_message "WARN" "Falling back to Gemini API. Reason: $error_msg" "API_ROUTER"
+    
+    # Enhance prompt with context about the fallback
+    local enhanced_prompt
+    enhanced_prompt="[Context: This query was attempted on local Ollama but failed due to: $error_msg]\n\nOriginal query: $prompt"
+    
+    gemini_fallback "$enhanced_prompt" "gemini-pro"
+}
+
+# -------------------------------------------------------------------------
+#   5️⃣  Enhanced Agent Communication Protocol
+# -------------------------------------------------------------------------
+agent_communicate() {
+    local sender="$1"
+    local receiver="$2"
+    local message="$3"
+    local context="${4:-}"
+    
+    # Check if communication is allowed
+    if [[ ! " ${AGENT_COMMUNICATION[$receiver]} " =~ " $sender " ]]; then
+        log_message "WARN" "Agent $sender cannot communicate directly with $receiver" "COMMS"
+        return 1
+    fi
+    
+    # Format the communication
+    local formatted_message
+    formatted_message=$(cat <<EOF
+[AGENT_COMMUNICATION]
+FROM: $sender
+TO: $receiver
+CONTEXT: $context
+MESSAGE: $message
+EOF
+)
+    
+    log_message "AGENT_COLLAB" "$sender → $receiver: ${message:0:100}..." "$sender"
+    
+    # Store communication in shared memory
+    sql_exec <<EOF
+INSERT INTO agent_communications 
+    (sender, receiver, message, context, timestamp)
+VALUES 
+    ('$sender', '$receiver', '$(escape_sql "$message")', '$(escape_sql "$context")', CURRENT_TIMESTAMP);
+EOF
+    
+    echo "$formatted_message"
+}
+
+# -------------------------------------------------------------------------
+#   6️⃣  Context-Aware Agent Execution
+# -------------------------------------------------------------------------
+execute_agent_with_context() {
+    local agent_name="$1"
+    local prompt="$2"
+    local context="${3:-}"
+    local previous_agents_results="${4:-}"
+    
+    local agent_role="${AGENT_ROLES[$agent_name]}"
+    
+    # Build enhanced prompt with context
+    local enhanced_prompt
+    enhanced_prompt=$(cat <<EOF
+[ROLE: ${agent_role}]
+[AGENT: ${agent_name}]
+
+CONTEXT FROM PREVIOUS ANALYSIS:
+${previous_agents_results}
+
+SPECIFIC INSTRUCTIONS:
+${context}
+
+TASK TO EXECUTE:
+${prompt}
+
+YOUR ANALYSIS:
+EOF
+)
+    
+    # Check if this is CODE agent receiving from SIGN/LOOP
+    if [[ "$agent_name" == "CODE" && -n "$context" ]]; then
+        enhanced_prompt+="\n\n[NOTE: You are receiving interpreted symbols from SIGN and optimization patterns from LOOP. Please translate these insights into executable code.]"
+    fi
+    
+    # Query AI
+    local response
+    response=$(query_ai "$enhanced_prompt" "$OLLAMA_MODEL" '{"temperature": 0.5, "num_predict": 1024}')
+    
+    if [[ "$response" == "__FALLBACK_ERROR__"* ]]; then
+        log_message "ERROR" "All AI services failed for agent $agent_name" "$agent_name"
+        response="[ERROR: AI service unavailable. Agent $agent_name cannot process.]"
+    fi
+    
+    # Store result
+    sql_exec <<EOF
+INSERT INTO agent_executions 
+    (agent_name, prompt, context, response, timestamp)
+VALUES 
+    ('$agent_name', '$(escape_sql "$prompt")', '$(escape_sql "$context")', '$(escape_sql "$response")', CURRENT_TIMESTAMP);
+EOF
+    
+    echo "$response"
+}
+
+# -------------------------------------------------------------------------
+#   7️⃣  Multi-Agent Collaboration Pipeline
+# -------------------------------------------------------------------------
+collaborative_analysis() {
+    local main_prompt="$1"
+    local focus_agents="${2:-ALL}"
+    
+    log_message "INFO" "Starting collaborative analysis with focus: $focus_agents" "SYNC"
+    
+    # Phase 1: Individual Analysis
+    local analysis_results=()
+    local analysis_agents=()
+    
+    if [[ "$focus_agents" == "ALL" ]]; then
+        analysis_agents=("CUBE" "CORE" "LOOP" "WAVE" "SIGN" "LINE" "COIN")
+    else
+        IFS=' ' read -ra analysis_agents <<< "$focus_agents"
+    fi
+    
+    for agent in "${analysis_agents[@]}"; do
+        log_message "INFO" "Phase 1: $agent analyzing..." "SYNC"
+        
+        local agent_prompt
+        case "$agent" in
+            SIGN)
+                agent_prompt="Interpret symbols and hidden meanings in: $main_prompt"
+                ;;
+            LOOP)
+                agent_prompt="Identify patterns and optimization opportunities in: $main_prompt"
+                ;;
+            CUBE)
+                agent_prompt="Analyze structure and components of: $main_prompt"
+                ;;
+            *)
+                agent_prompt="Analyze from your role perspective: $main_prompt"
+                ;;
+        esac
+        
+        local result
+        result=$(execute_agent_with_context "$agent" "$agent_prompt" "" "")
+        analysis_results+=("$agent:$result")
+        
+        log_message "INFO" "$agent analysis complete" "SYNC"
+    done
+    
+    # Phase 2: Agent Communication & Synthesis
+    local synthesized_context=""
+    for result_entry in "${analysis_results[@]}"; do
+        local agent="${result_entry%%:*}"
+        local result="${result_entry#*:}"
+        synthesized_context+="=== $agent ===\n$result\n\n"
+    done
+    
+    # Phase 3: Specialized Agent Execution (CODE, WORK, etc.)
+    local final_results=()
+    
+    # Check if we need CODE agent
+    if [[ "$focus_agents" == "ALL" ]] || [[ " $focus_agents " =~ " CODE " ]]; then
+        log_message "INFO" "Phase 3: CODE agent executing with insights..." "SYNC"
+        
+        # Prepare communications from SIGN and LOOP to CODE
+        local sign_to_code loop_to_code
+        
+        for result_entry in "${analysis_results[@]}"; do
+            local agent="${result_entry%%:*}"
+            local result="${result_entry#*:}"
+            
+            case "$agent" in
+                SIGN)
+                    sign_to_code=$(agent_communicate "SIGN" "CODE" "$result" "Symbol interpretation for code generation")
+                    ;;
+                LOOP)
+                    loop_to_code=$(agent_communicate "LOOP" "CODE" "$result" "Optimization patterns for implementation")
+                    ;;
+            esac
+        done
+        
+        # CODE agent execution with received communications
+        local code_context="Received insights:\n"
+        [[ -n "$sign_to_code" ]] && code_context+="- From SIGN: ${sign_to_code}\n"
+        [[ -n "$loop_to_code" ]] && code_context+="- From LOOP: ${loop_to_code}\n"
+        
+        local code_result
+        code_result=$(execute_agent_with_context "CODE" \
+            "Generate executable code based on all analysis insights" \
+            "$code_context" \
+            "$synthesized_context")
+        
+        final_results+=("CODE:$code_result")
+    fi
+    
+    # Check if we need WORK agent
+    if [[ "$focus_agents" == "ALL" ]] || [[ " $focus_agents " =~ " WORK " ]]; then
+        log_message "INFO" "Phase 3: WORK agent executing with insights..." "SYNC"
+        
+        local work_result
+        work_result=$(execute_agent_with_context "WORK" \
+            "Create actionable steps and implementation plan" \
+            "Based on comprehensive analysis from all agents" \
+            "$synthesized_context")
+        
+        final_results+=("WORK:$work_result")
+    fi
+    
+    # Phase 4: Final Synchronization
+    log_message "INFO" "Phase 4: Final synchronization..." "SYNC"
+    
+    local sync_prompt="Synthesize final results from all agents:\n\n"
+    sync_prompt+="Original Task: $main_prompt\n\n"
+    sync_prompt+="Agent Analyses:\n$synthesized_context\n"
+    
+    if [[ ${#final_results[@]} -gt 0 ]]; then
+        sync_prompt+="\nSpecialized Executions:\n"
+        for result_entry in "${final_results[@]}"; do
+            local agent="${result_entry%%:*}"
+            local result="${result_entry#*:}"
+            sync_prompt+="=== $agent ===\n$result\n\n"
+        done
+    fi
+    
+    sync_prompt+="Provide a comprehensive final answer integrating all insights."
+    
+    local final_output
+    final_output=$(execute_agent_with_context "SYNC" "$sync_prompt" "" "")
+    
+    # Output structured results
+    jq -n \
+        --arg prompt "$main_prompt" \
+        --argjson analysis_agents "$(printf '%s\n' "${analysis_agents[@]}" | jq -R . | jq -s .)" \
+        --argjson analysis_results "$(printf '%s\n' "${analysis_results[@]}" | jq -R . | jq -s .)" \
+        --argjson final_results "$(printf '%s\n' "${final_results[@]}" | jq -R . | jq -s .)" \
+        --arg final_output "$final_output" \
+        '{
+            status: "success",
+            original_prompt: $prompt,
+            analysis_phase: {
+                agents: $analysis_agents,
+                results: $analysis_results
+            },
+            execution_phase: {
+                results: $final_results
+            },
+            final_synthesis: $final_output,
+            timestamp: now | todate
+        }'
+}
+
+# -------------------------------------------------------------------------
+#   8️⃣  Model Management & Discovery
+# -------------------------------------------------------------------------
+discover_ollama_models() {
+    local timeout=5
+    
+    log_message "INFO" "Discovering Ollama models..." "MODEL_MGMT"
+    
+    local response
+    response=$(curl -s --max-time "$timeout" "${OLLAMA_HOST}/api/tags" 2>/dev/null || true)
+    
+    if [[ -n "$response" ]] && echo "$response" | jq -e '.models' >/dev/null 2>&1; then
+        local models
+        models=$(echo "$response" | jq -r '.models[].name')
+        
+        if [[ -z "$models" ]]; then
+            log_message "WARN" "Ollama running but no models found" "MODEL_MGMT"
+            echo ""
+        else
+            log_message "INFO" "Found models: $(echo "$models" | tr '\n' ', ')" "MODEL_MGMT"
+            echo "$models"
+        fi
+    else
+        log_message "ERROR" "Failed to discover Ollama models" "MODEL_MGMT"
+        echo ""
+    fi
+}
+
+get_active_model() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        jq -r '.active_model // empty' "$CONFIG_FILE" 2>/dev/null || echo "$OLLAMA_MODEL"
+    else
+        echo "$OLLAMA_MODEL"
+    fi
+}
+
+set_active_model() {
+    local model="$1"
+    
+    # Verify model exists if Ollama is available
+    local available_models
+    available_models=$(discover_ollama_models)
+    
+    if [[ -n "$available_models" ]] && ! echo "$available_models" | grep -q "^${model}$"; then
+        log_message "WARN" "Model '$model' not found in Ollama, but setting anyway" "MODEL_MGMT"
+    fi
+    
+    # Update config
+    jq -n --arg model "$model" '{active_model: $model}' > "$CONFIG_FILE"
+    log_message "INFO" "Active model set to: $model" "MODEL_MGMT"
+}
+
+# -------------------------------------------------------------------------
+#   9️⃣  Enhanced Database Schema
+# -------------------------------------------------------------------------
+init_enhanced_database() {
+    sql_exec <<'SQL'
+PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
+
+BEGIN TRANSACTION;
+
+-- Agent executions with context
+CREATE TABLE IF NOT EXISTS agent_executions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    context TEXT,
+    response TEXT NOT NULL,
+    tokens_used INTEGER,
+    model_used TEXT,
+    success BOOLEAN DEFAULT 1,
+    error_message TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Agent communications
+CREATE TABLE IF NOT EXISTS agent_communications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender TEXT NOT NULL,
+    receiver TEXT NOT NULL,
+    message TEXT NOT NULL,
+    context TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Model usage tracking
+CREATE TABLE IF NOT EXISTS model_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_name TEXT NOT NULL,
+    query_count INTEGER DEFAULT 0,
+    success_count INTEGER DEFAULT 0,
+    error_count INTEGER DEFAULT 0,
+    avg_response_time REAL,
+    last_used DATETIME,
+    UNIQUE(model_name)
+);
+
+-- Collaboration sessions
+CREATE TABLE IF NOT EXISTS collaboration_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT UNIQUE NOT NULL,
+    prompt TEXT NOT NULL,
+    agents_involved TEXT,
+    result_summary TEXT,
+    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    end_time DATETIME,
+    status TEXT DEFAULT 'running'
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_executions ON agent_executions (agent_name, timestamp);
+CREATE INDEX IF NOT EXISTS idx_agent_comms ON agent_communications (sender, receiver, timestamp);
+CREATE INDEX IF NOT EXISTS idx_model_usage ON model_usage (model_name);
+
+COMMIT;
+SQL
+}
+
+# -------------------------------------------------------------------------
+#   🔟  Testing & Validation Suite
+# -------------------------------------------------------------------------
+test_ollama_integration() {
+    local test_model="${1:-}"
+    
+    log_message "INFO" "Starting Ollama integration tests..." "TESTING"
+    
+    # Test 1: Connectivity
+    echo "=== Test 1: Ollama Connectivity ==="
+    if curl -s --max-time 5 "${OLLAMA_HOST}/api/tags" >/dev/null 2>&1; then
+        echo "✓ Ollama service is reachable"
+    else
+        echo "✗ Ollama service is unreachable"
+        return 1
+    fi
+    
+    # Test 2: Model discovery
+    echo -e "\n=== Test 2: Model Discovery ==="
+    local models
+    models=$(discover_ollama_models)
+    if [[ -n "$models" ]]; then
+        echo "✓ Models discovered:"
+        echo "$models" | while read -r model; do
+            echo "  - $model"
+        done
+    else
+        echo "✗ No models discovered"
+    fi
+    
+    # Test 3: Simple query
+    echo -e "\n=== Test 3: Simple Query Test ==="
+    local test_response
+    test_response=$(ollama_query "Reply with 'OK' if you can hear me." "$test_model" '{"temperature": 0.1, "num_predict": 10}' 2>/dev/null || true)
+    
+    if [[ "$test_response" == *"OK"* ]] || [[ "$test_response" != "__OLLAMA_ERROR__"* ]]; then
+        echo "✓ Basic query successful"
+        echo "  Response: ${test_response:0:50}..."
+    else
+        echo "✗ Basic query failed"
+        echo "  Error: ${test_response#__OLLAMA_ERROR__:}"
+    fi
+    
+    # Test 4: Fallback mechanism
+    echo -e "\n=== Test 4: Fallback Mechanism ==="
+    if [[ -n "$GEMINI_API_KEY" ]]; then
+        echo "Testing Gemini fallback..."
+        local fallback_response
+        fallback_response=$(gemini_fallback "Say 'FALLBACK_TEST_OK'" 2>/dev/null || true)
+        
+        if [[ "$fallback_response" != "__FALLBACK_ERROR__"* ]]; then
+            echo "✓ Fallback mechanism working"
+            echo "  Response: ${fallback_response:0:50}..."
+        else
+            echo "✗ Fallback mechanism failed"
+        fi
+    else
+        echo "⚠ Gemini API key not set, skipping fallback test"
+    fi
+    
+    # Test 5: Agent communication
+    echo -e "\n=== Test 5: Agent Communication ==="
+    local comm_test
+    comm_test=$(agent_communicate "SIGN" "CODE" "Test message" "Test context" 2>/dev/null || true)
+    
+    if [[ -n "$comm_test" ]]; then
+        echo "✓ Agent communication working"
+    else
+        echo "✗ Agent communication failed"
+    fi
+    
+    log_message "INFO" "Ollama integration tests completed" "TESTING"
+}
+
+# -------------------------------------------------------------------------
+#   1️⃣1️⃣  Main Entry Point with Enhanced UI Integration
+# -------------------------------------------------------------------------
+main() {
+    local cmd="${1:-help}"
+    
+    # Initialize
+    init_enhanced_database
+    
+    case "$cmd" in
+        analyze)
+            [[ $# -lt 2 ]] && { echo "Usage: $0 analyze \"<prompt>\" [agents]"; exit 1; }
+            collaborative_analysis "$2" "${3:-ALL}"
+            ;;
+            
+        models)
+            echo "Available Ollama Models:"
+            discover_ollama_models | while read -r model; do
+                local active=""
+                [[ "$model" == "$(get_active_model)" ]] && active=" (active)"
+                echo "  $model$active"
+            done
+            echo -e "\nActive Model: $(get_active_model)"
+            ;;
+            
+        set-model)
+            [[ $# -lt 2 ]] && { echo "Usage: $0 set-model <model-name>"; exit 1; }
+            set_active_model "$2"
+            ;;
+            
+        test)
+            test_ollama_integration "${2:-}"
+            ;;
+            
+        chat)
+            [[ $# -lt 2 ]] && { echo "Usage: $0 chat \"<message>\""; exit 1; }
+            query_ai "$2" "$(get_active_model)" '{"temperature": 0.7}'
+            ;;
+            
+        agent)
+            [[ $# -lt 3 ]] && { echo "Usage: $0 agent <agent-name> \"<prompt>\""; exit 1; }
+            execute_agent_with_context "$2" "$3"
+            ;;
+            
+        comm)
+            [[ $# -lt 4 ]] && { echo "Usage: $0 comm <sender> <receiver> \"<message>\""; exit 1; }
+            agent_communicate "$2" "$3" "$4"
+            ;;
+            
+        status)
+            echo "=== System Status ==="
+            echo "Active Model: $(get_active_model)"
+            echo "Ollama Host: $OLLAMA_HOST"
+            echo "Database: $DB_FILE"
+            echo "Log File: $LOG_FILE"
+            
+            local model_count
+            model_count=$(discover_ollama_models | wc -l)
+            echo "Available Models: $model_count"
+            
+            local session_count
+            session_count=$(sql_exec "SELECT COUNT(*) FROM collaboration_sessions WHERE status='running';")
+            echo "Active Sessions: $session_count"
+            ;;
+            
+        help|*)
+            cat <<'EOF'
+WSL AI Orchestration System v5.0
+================================
+
+Enhanced Features:
+• Multi-agent collaboration with context sharing
+• Ollama API bridge with intelligent fallback to Gemini
+• Agent communication protocols (SIGN→CODE, LOOP→WORK, etc.)
+• Model discovery and management
+• Structured logging and telemetry
+
+Commands:
+  analyze "<prompt>" [agents]    – Collaborative analysis with specified agents
+  models                         – List available Ollama models
+  set-model <name>              – Set active model
+  test [model]                  – Run integration tests
+  chat "<message>"              – Direct chat with active model
+  agent <name> "<prompt>"       – Execute single agent
+  comm <from> <to> "<msg>"      – Send message between agents
+  status                        – System status
+  help                          – This message
+
+Agent Names: CUBE, CORE, LOOP, WAVE, SIGN, LINE, COIN, WORK, CODE, SYNC
+
+Examples:
+  $0 analyze "Optimize this Python function" "LOOP CODE"
+  $0 set-model llama3:latest
+  $0 comm SIGN CODE "The symbol represents a loop iterator"
+  $0 test llama3
+
+EOF
+            ;;
+    esac
+}
+
+# Run main
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
+2. TypeScript Nexus Engine with Enhanced Ollama Integration
+Now, let me create the TypeScript service with robust Ollama API integration:
+
+typescript
+// services/nexusEngine.ts
+import axios, { AxiosError, AxiosResponse } from 'axios';
+import { config } from '../config';
+
+// Types
+interface OllamaOptions {
+  temperature?: number;
+  num_predict?: number;
+  top_p?: number;
+  repeat_penalty?: number;
+  seed?: number;
+  [key: string]: any;
+}
+
+interface OllamaRequest {
+  model: string;
+  prompt: string;
+  stream?: boolean;
+  options?: OllamaOptions;
+}
+
+interface OllamaResponse {
+  model: string;
+  response: string;
+  done: boolean;
+  context?: number[];
+  total_duration?: number;
+  load_duration?: number;
+  prompt_eval_count?: number;
+  eval_count?: number;
+}
+
+interface AgentResponse {
+  agent: string;
+  decision: string;
+  reasoning: string;
+  confidence: number;
+  rawResponse: string;
+}
+
+interface OllamaError {
+  type: 'connection' | 'timeout' | 'model_not_found' | 'api_error' | 'rate_limit' | 'parsing';
+  message: string;
+  details?: any;
+}
+
+// Configuration
+const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
+const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '30000');
+const OLLAMA_RETRY_ATTEMPTS = parseInt(process.env.OLLAMA_RETRY_ATTEMPTS || '2');
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || config.geminiApiKey;
+const FALLBACK_ENABLED = process.env.FALLBACK_ENABLED !== 'false';
+
+// Model cache
+let availableModels: string[] = [];
+let lastModelDiscovery = 0;
+const MODEL_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Enhanced Ollama API client with robust error handling
+ */
+export class OllamaBridge {
+  private static instance: OllamaBridge;
+  
+  static getInstance(): OllamaBridge {
+    if (!OllamaBridge.instance) {
+      OllamaBridge.instance = new OllamaBridge();
+    }
+    return OllamaBridge.instance;
+  }
+
+  /**
+   * Query Ollama with enhanced error handling and fallback
+   */
+  async queryOllama(
+    prompt: string, 
+    model: string = 'llama3', 
+    options: OllamaOptions = {}, 
+    stream: boolean = false
+  ): Promise<OllamaResponse> {
+    const requestData: OllamaRequest = {
+      model,
+      prompt,
+      stream,
+      options: {
+        temperature: 0.7,
+        num_predict: 512,
+        ...options
+      }
+    };
+
+    // Log the attempt
+    console.log(`[OllamaBridge] Querying model ${model} with ${prompt.length} chars`);
+
+    try {
+      const response = await this.makeRequestWithRetry(
+        `${OLLAMA_HOST}/api/generate`,
+        requestData,
+        OLLAMA_RETRY_ATTEMPTS
+      );
+
+      return this.parseResponse(response, model, stream);
+
+    } catch (error) {
+      const ollamaError = this.classifyError(error);
+      
+      // Enhanced error logging
+      console.error(`[OllamaBridge] Query failed:`, {
+        errorType: ollamaError.type,
+        message: ollamaError.message,
+        model,
+        promptLength: prompt.length,
+        timestamp: new Date().toISOString()
+      });
+
+      // If fallback is enabled and this is a recoverable error
+      if (FALLBACK_ENABLED && this.isRecoverableError(ollamaError)) {
+        console.warn(`[OllamaBridge] Attempting fallback to Gemini API`);
+        return await this.fallbackToGemini(prompt, model, ollamaError);
+      }
+
+      throw new Error(`Ollama query failed: ${ollamaError.message}`);
+    }
+  }
+
+  /**
+   * Make HTTP request with retry logic
+   */
+  private async makeRequestWithRetry(
+    url: string,
+    data: OllamaRequest,
+    retries: number
+  ): Promise<AxiosResponse> {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await axios.post(url, data, {
+          timeout: OLLAMA_TIMEOUT,
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          validateStatus: (status) => status === 200
+        });
+
+        return response;
+
+      } catch (error) {
+        const axiosError = error as AxiosError;
+        
+        // Log retry attempts
+        if (attempt < retries) {
+          const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+          console.warn(`[OllamaBridge] Attempt ${attempt + 1} failed, retrying in ${delay}ms:`, 
+            axiosError.message);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        // Last attempt failed
+        throw error;
+      }
+    }
+
+    throw new Error('Max retry attempts exceeded');
+  }
+
+  /**
+   * Classify Ollama errors for better handling
+   */
+  private classifyError(error: any): OllamaError {
+    const axiosError = error as AxiosError;
+    
+    if (axiosError.code === 'ECONNREFUSED') {
+      return {
+        type: 'connection',
+        message: 'Cannot connect to Ollama. Ensure it is running at the correct host/port.',
+        details: { host: OLLAMA_HOST }
+      };
+    }
+
+    if (axiosError.code === 'ETIMEDOUT') {
+      return {
+        type: 'timeout',
+        message: `Ollama request timed out after ${OLLAMA_TIMEOUT}ms.`,
+        details: { timeout: OLLAMA_TIMEOUT }
+      };
+    }
+
+    if (axiosError.response?.status === 404) {
+      return {
+        type: 'model_not_found',
+        message: `Model not found. Please ensure the model is pulled: 'ollama pull <model-name>'`,
+        details: { status: 404 }
+      };
+    }
+
+    if (axiosError.response?.status === 429) {
+      return {
+        type: 'rate_limit',
+        message: 'Ollama rate limit exceeded. Please try again later.',
+        details: { status: 429 }
+      };
+    }
+
+    // Try to extract error from response body
+    if (axiosError.response?.data) {
+      try {
+        const errorData = typeof axiosError.response.data === 'string' 
+          ? JSON.parse(axiosError.response.data)
+          : axiosError.response.data;
+        
+        return {
+          type: 'api_error',
+          message: errorData.error || 'Ollama API error',
+          details: errorData
+        };
+      } catch {
+        // If we can't parse, return generic error
+      }
+    }
+
+    // Default parsing error
+    if (error.message?.includes('Unexpected token') || error.message?.includes('JSON')) {
+      return {
+        type: 'parsing',
+        message: 'Failed to parse Ollama response. The response format may have changed.',
+        details: { rawResponse: error.message }
+      };
+    }
+
+    return {
+      type: 'api_error',
+      message: `Ollama error: ${error.message || 'Unknown error'}`,
+      details: error
+    };
+  }
+
+  /**
+   * Check if error is recoverable (should trigger fallback)
+   */
+  private isRecoverableError(error: OllamaError): boolean {
+    const recoverableTypes: OllamaError['type'][] = [
+      'connection',
+      'timeout',
+      'model_not_found',
+      'api_error'
+    ];
+    
+    return recoverableTypes.includes(error.type) && !!GEMINI_API_KEY;
+  }
+
+  /**
+   * Fallback to Gemini API
+   */
+  private async fallbackToGemini(
+    prompt: string,
+    originalModel: string,
+    ollamaError: OllamaError
+  ): Promise<OllamaResponse> {
+    try {
+      console.log(`[OllamaBridge] Starting fallback to Gemini API. Original error: ${ollamaError.message}`);
+      
+      const fallbackPrompt = this.createFallbackPrompt(prompt, originalModel, ollamaError);
+      
+      const response = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent`,
+        {
+          contents: [{
+            parts: [{ text: fallbackPrompt }]
+          }]
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': GEMINI_API_KEY
+          },
+          timeout: 30000
+        }
+      );
+
+      const geminiText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      
+      if (!geminiText) {
+        throw new Error('Gemini API returned empty response');
+      }
+
+      // Log successful fallback
+      console.log(`[OllamaBridge] Fallback to Gemini successful. Response length: ${geminiText.length} chars`);
+      
+      // Return formatted as Ollama response for compatibility
+      return {
+        model: 'gemini-pro (fallback)',
+        response: geminiText,
+        done: true,
+        context: []
+      };
+
+    } catch (fallbackError) {
+      console.error(`[OllamaBridge] Gemini fallback also failed:`, fallbackError);
+      throw new Error(`Both Ollama and Gemini failed: ${ollamaError.message}`);
+    }
+  }
+
+  /**
+   * Create enhanced prompt for fallback
+   */
+  private createFallbackPrompt(
+    originalPrompt: string,
+    originalModel: string,
+    error: OllamaError
+  ): string {
+    return `
+[Context: This query was originally intended for local Ollama model "${originalModel}" 
+but failed due to: ${error.message}]
+
+[Instructions: Please provide a response as if you were the local AI model. 
+Maintain the expected response format and tone.]
+
+Original query: ${originalPrompt}
+`;
+  }
+
+  /**
+   * Parse Ollama response with robust handling
+   */
+  private parseResponse(
+    response: AxiosResponse,
+    model: string,
+    stream: boolean
+  ): OllamaResponse {
+    try {
+      if (stream) {
+        return this.parseStreamResponse(response.data, model);
+      } else {
+        return this.parseStandardResponse(response.data, model);
+      }
+    } catch (error) {
+      console.error(`[OllamaBridge] Failed to parse response:`, error);
+      
+      // Attempt to extract meaningful information even if parsing fails
+      const rawData = response.data;
+      let extractedResponse = '';
+      
+      if (typeof rawData === 'string') {
+        // Try to find JSON-like structure
+        const jsonMatch = rawData.match(/"response":\s*"([^"]+)"/);
+        if (jsonMatch) {
+          extractedResponse = jsonMatch[1];
+        } else {
+          // Try to extract any text that looks like a response
+          extractedResponse = rawData.substring(0, 500);
+        }
+      } else if (rawData && typeof rawData === 'object') {
+        // Try various known response formats
+        extractedResponse = 
+          rawData.response || 
+          rawData.text || 
+          rawData.content ||
+          JSON.stringify(rawData).substring(0, 500);
+      }
+      
+      return {
+        model,
+        response: extractedResponse || 'Unable to parse response',
+        done: true,
+        context: []
+      };
+    }
+  }
+
+  /**
+   * Parse standard (non-streaming) response
+   */
+  private parseStandardResponse(data: any, model: string): OllamaResponse {
+    // Handle various response formats
+    let responseText = '';
+    let done = true;
+    
+    if (typeof data === 'string') {
+      // Try to parse as JSON
+      try {
+        const parsed = JSON.parse(data);
+        responseText = parsed.response || parsed.text || '';
+        done = parsed.done !== false;
+      } catch {
+        // If not JSON, use as-is
+        responseText = data;
+      }
+    } else if (data && typeof data === 'object') {
+      // Handle different possible structures
+      if (data.response !== undefined) {
+        responseText = data.response;
+        done = data.done !== false;
+      } else if (data.text !== undefined) {
+        responseText = data.text;
+      } else if (data.content !== undefined) {
+        responseText = data.content;
+      } else {
+        // Last resort: stringify
+        responseText = JSON.stringify(data);
+      }
+    }
+    
+    return {
+      model,
+      response: responseText,
+      done,
+      context: data.context || [],
+      total_duration: data.total_duration,
+      load_duration: data.load_duration,
+      prompt_eval_count: data.prompt_eval_count,
+      eval_count: data.eval_count
+    };
+  }
+
+  /**
+   * Parse streaming response
+   */
+  private parseStreamResponse(data: any, model: string): OllamaResponse {
+    // Streaming responses come as newline-delimited JSON
+    const lines = data.split('\n').filter((line: string) => line.trim());
+    let fullResponse = '';
+    let context: number[] = [];
+    
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.response) {
+          fullResponse += parsed.response;
+        }
+        if (parsed.done && parsed.context) {
+          context = parsed.context;
+        }
+      } catch {
+        // Skip invalid JSON lines
+      }
+    }
+    
+    return {
+      model,
+      response: fullResponse,
+      done: true,
+      context
+    };
+  }
+
+  /**
+   * Discover available Ollama models
+   */
+  async discoverModels(forceRefresh: boolean = false): Promise<string[]> {
+    const now = Date.now();
+    
+    // Use cache if valid
+    if (!forceRefresh && availableModels.length > 0 && 
+        (now - lastModelDiscovery) < MODEL_CACHE_TTL) {
+      return availableModels;
+    }
+    
+    try {
+      const response = await axios.get(`${OLLAMA_HOST}/api/tags`, {
+        timeout: 5000
+      });
+      
+      if (response.data?.models) {
+        availableModels = response.data.models.map((model: any) => model.name);
+        lastModelDiscovery = now;
+        console.log(`[OllamaBridge] Discovered ${availableModels.length} models`);
+        return availableModels;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error(`[OllamaBridge] Failed to discover models:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Test Ollama connection and model
+   */
+  async testConnection(model: string = 'llama3'): Promise<{
+    success: boolean;
+    message: string;
+    details?: any;
+  }> {
+    try {
+      // Test connectivity
+      await axios.get(`${OLLAMA_HOST}/api/tags`, { timeout: 3000 });
+      
+      // Test model
+      const response = await this.queryOllama(
+        'Please respond with the word "READY" if you are operational.',
+        model,
+        { temperature: 0.1, num_predict: 10 },
+        false
+      );
+      
+      const isReady = response.response?.toUpperCase().includes('READY');
+      
+      return {
+        success: isReady,
+        message: isReady 
+          ? `Model ${model} is ready and responding` 
+          : `Model responded but not as expected: ${response.response}`,
+        details: {
+          model,
+          response: response.response,
+          responseTime: response.total_duration
+        }
+      };
+      
+    } catch (error) {
+      const classifiedError = this.classifyError(error);
+      return {
+        success: false,
+        message: `Connection test failed: ${classifiedError.message}`,
+        details: classifiedError
+      };
+    }
+  }
+}
+
+/**
+ * Enhanced agent response parser
+ */
+export class AgentResponseParser {
+  
+  /**
+   * Parse agent response with multiple fallback strategies
+   */
+  static parseAgentResponse(
+    rawResponse: string, 
+    expectedAgent: string
+  ): AgentResponse {
+    const strategies = [
+      this.parseStructuredJson,
+      this.parseMarkdownWithHeaders,
+      this.parseKeyValueFormat,
+      this.parseNaturalLanguage
+    ];
+    
+    for (const strategy of strategies) {
+      try {
+        const parsed = strategy(rawResponse, expectedAgent);
+        if (parsed && parsed.decision && parsed.reasoning) {
+          return {
+            ...parsed,
+            rawResponse,
+            confidence: parsed.confidence || this.calculateConfidence(parsed)
+          };
+        }
+      } catch {
+        // Try next strategy
+        continue;
+      }
+    }
+    
+    // Last resort fallback
+    return this.createFallbackResponse(rawResponse, expectedAgent);
+  }
+  
+  /**
+   * Strategy 1: Parse structured JSON
+   */
+  private static parseStructuredJson(
+    rawResponse: string, 
+    expectedAgent: string
+  ): Partial<AgentResponse> | null {
+    // Try to find JSON in the response
+    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      
+      // Handle various JSON structures
+      return {
+        agent: parsed.agent || parsed.role || expectedAgent,
+        decision: parsed.decision || parsed.result || parsed.output || '',
+        reasoning: parsed.reasoning || parsed.analysis || parsed.explanation || '',
+        confidence: parsed.confidence || parsed.certainty || 0.5
+      };
+    } catch {
+      return null;
+    }
+  }
+  
+  /**
+   * Strategy 2: Parse markdown with headers
+   */
+  private static parseMarkdownWithHeaders(
+    rawResponse: string,
+    expectedAgent: string
+  ): Partial<AgentResponse> | null {
+    const decisionMatch = rawResponse.match(/##? Decision[:\s]*\n*(.*?)(?=\n##? |$)/is);
+    const reasoningMatch = rawResponse.match(/##? Reasoning[:\s]*\n*(.*?)(?=\n##? |$)/is);
+    const agentMatch = rawResponse.match(/##? Agent[:\s]*\n*(\w+)/i);
+    
+    if (!decisionMatch && !reasoningMatch) return null;
+    
+    return {
+      agent: agentMatch?.[1] || expectedAgent,
+      decision: decisionMatch?.[1]?.trim() || '',
+      reasoning: reasoningMatch?.[1]?.trim() || '',
+      confidence: this.extractConfidenceFromText(rawResponse)
+    };
+  }
+  
+  /**
+   * Strategy 3: Parse key-value format
+   */
+  private static parseKeyValueFormat(
+    rawResponse: string,
+    expectedAgent: string
+  ): Partial<AgentResponse> | null {
+    const lines = rawResponse.split('\n');
+    let decision = '';
+    let reasoning = '';
+    let agent = expectedAgent;
+    
+    for (const line of lines) {
+      const lowerLine = line.toLowerCase();
+      if (lowerLine.includes('decision:')) {
+        decision = line.split(':').slice(1).join(':').trim();
+      } else if (lowerLine.includes('reasoning:')) {
+        reasoning = line.split(':').slice(1).join(':').trim();
+      } else if (lowerLine.includes('agent:')) {
+        agent = line.split(':').slice(1).join(':').trim();
+      }
+    }
+    
+    if (!decision && !reasoning) return null;
+    
+    return {
+      agent,
+      decision,
+      reasoning,
+      confidence: this.extractConfidenceFromText(rawResponse)
+    };
+  }
+  
+  /**
+   * Strategy 4: Parse natural language (last resort)
+   */
+  private static parseNaturalLanguage(
+    rawResponse: string,
+    expectedAgent: string
+  ): Partial<AgentResponse> | null {
+    // Extract first sentence as decision, rest as reasoning
+    const sentences = rawResponse.split(/[.!?]+/).filter(s => s.trim());
+    
+    if (sentences.length === 0) return null;
+    
+    return {
+      agent: expectedAgent,
+      decision: sentences[0].trim(),
+      reasoning: sentences.slice(1).join('. ').trim() || sentences[0].trim(),
+      confidence: 0.3 // Low confidence for this method
+    };
+  }
+  
+  /**
+   * Extract confidence from text using various patterns
+   */
+  private static extractConfidenceFromText(text: string): number {
+    const patterns = [
+      /confidence[:\s]*(\d+\.?\d*)/i,
+      /certainty[:\s]*(\d+\.?\d*)/i,
+      /(\d+)% (confidence|certainty)/i,
+      /I am (\d+)% sure/i
+    ];
+    
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match) {
+        const value = parseFloat(match[1]);
+        if (!isNaN(value)) {
+          return value > 1 ? value / 100 : value;
+        }
+      }
+    }
+    
+    // Default medium confidence
+    return 0.5;
+  }
+  
+  /**
+   * Calculate confidence based on response characteristics
+   */
+  private static calculateConfidence(parsed: Partial<AgentResponse>): number {
+    let confidence = 0.5;
+    
+    // Longer reasoning suggests more confidence
+    if (parsed.reasoning && parsed.reasoning.length > 50) {
+      confidence += 0.2;
+    }
+    
+    // Clear decision suggests more confidence
+    if (parsed.decision && parsed.decision.length > 10) {
+      confidence += 0.2;
+    }
+    
+    // Contains numbers or specific references
+    if (parsed.decision?.match(/\d+/) || parsed.reasoning?.match(/\d+/)) {
+      confidence += 0.1;
+    }
+    
+    return Math.min(0.95, confidence);
+  }
+  
+  /**
+   * Create fallback response when all parsing fails
+   */
+  private static createFallbackResponse(
+    rawResponse: string,
+    expectedAgent: string
+  ): AgentResponse {
+    return {
+      agent: expectedAgent,
+      decision: 'Unable to parse specific decision',
+      reasoning: `Raw response: ${rawResponse.substring(0, 200)}...`,
+      confidence: 0.1,
+      rawResponse
+    };
+  }
+}
+
+/**
+ * Enhanced Nexus Engine with multi-agent collaboration
+ */
+export class NexusEngine {
+  private ollamaBridge: OllamaBridge;
+  private activeModel: string = 'llama3';
+  
+  constructor() {
+    this.ollamaBridge = OllamaBridge.getInstance();
+  }
+  
+  /**
+   * Process prompt with multi-agent collaboration
+   */
+  async processPrompt(
+    prompt: string,
+    options: {
+      model?: string;
+      useAgents?: string[];
+      enableStreaming?: boolean;
+    } = {}
+  ): Promise<{
+    success: boolean;
+    result: any;
+    agentDecisions: AgentResponse[];
+    fallbackUsed: boolean;
+    errors: string[];
+  }> {
+    const startTime = Date.now();
+    const errors: string[] = [];
+    let fallbackUsed = false;
+    
+    // Set active model
+    if (options.model) {
+      this.activeModel = options.model;
+    }
+    
+    // Determine which agents to use
+    const agents = options.useAgents || ['CUBE', 'CORE', 'LOOP', 'WAVE', 'SIGN', 'LINE', 'COIN', 'WORK'];
+    
+    console.log(`[NexusEngine] Processing prompt with ${agents.length} agents`);
+    
+    try {
+      // Phase 1: Individual agent analysis
+      const agentPromises = agents.map(agent => 
+        this.executeAgent(agent, prompt, options.enableStreaming)
+      );
+      
+      const agentResults = await Promise.allSettled(agentPromises);
+      
+      // Process agent results
+      const successfulAgents: AgentResponse[] = [];
+      const agentDecisions: AgentResponse[] = [];
+      
+      agentResults.forEach((result, index) => {
+        const agent = agents[index];
+        
+        if (result.status === 'fulfilled') {
+          const agentResponse = AgentResponseParser.parseAgentResponse(
+            result.value,
+            agent
+          );
+          
+          successfulAgents.push(agentResponse);
+          agentDecisions.push(agentResponse);
+          
+          console.log(`[NexusEngine] Agent ${agent} completed with confidence ${agentResponse.confidence}`);
+        } else {
+          errors.push(`Agent ${agent} failed: ${result.reason}`);
+          console.error(`[NexusEngine] Agent ${agent} failed:`, result.reason);
+        }
+      });
+      
+      // Phase 2: Agent collaboration (if we have multiple successful agents)
+      let collaborationResult = '';
+      
+      if (successfulAgents.length > 1) {
+        collaborationResult = await this.coordinateAgents(
+          prompt,
+          successfulAgents,
+          options.enableStreaming
+        );
+      } else if (successfulAgents.length === 1) {
+        collaborationResult = successfulAgents[0].decision;
+      } else {
+        throw new Error('All agents failed to process the prompt');
+      }
+      
+      // Phase 3: Final synthesis
+      const finalResult = await this.synthesizeResult(
+        prompt,
+        collaborationResult,
+        agentDecisions,
+        options.enableStreaming
+      );
+      
+      const processingTime = Date.now() - startTime;
+      
+      console.log(`[NexusEngine] Processing completed in ${processingTime}ms`);
+      console.log(`[NexusEngine] ${successfulAgents.length}/${agents.length} agents successful`);
+      if (fallbackUsed) {
+        console.warn(`[NexusEngine] Fallback mechanism was used`);
+      }
+      
+      return {
+        success: true,
+        result: finalResult,
+        agentDecisions,
+        fallbackUsed,
+        errors
+      };
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      errors.push(`Processing failed: ${errorMessage}`);
+      
+      console.error(`[NexusEngine] Processing failed:`, error);
+      
+      // Final fallback: direct query without agents
+      try {
+        console.warn(`[NexusEngine] Attempting direct query as final fallback`);
+        const directResponse = await this.ollamaBridge.queryOllama(
+          prompt,
+          this.activeModel,
+          { temperature: 0.7 }
+        );
+        
+        fallbackUsed = true;
+        
+        return {
+          success: true,
+          result: directResponse.response,
+          agentDecisions: [],
+          fallbackUsed: true,
+          errors: [...errors, 'Used direct query fallback']
+        };
+        
+      } catch (fallbackError) {
+        return {
+          success: false,
+          result: 'All processing attempts failed',
+          agentDecisions: [],
+          fallbackUsed: false,
+          errors: [...errors, `Fallback also failed: ${fallbackError}`]
+        };
+      }
+    }
+  }
+  
+  /**
+   * Execute individual agent
+   */
+  private async executeAgent(
+    agent: string,
+    prompt: string,
+    stream?: boolean
+  ): Promise<string> {
+    const agentPrompt = this.createAgentPrompt(agent, prompt);
+    
+    const response = await this.ollamaBridge.queryOllama(
+      agentPrompt,
+      this.activeModel,
+      this.getAgentOptions(agent),
+      stream
+    );
+    
+    return response.response;
+  }
+  
+  /**
+   * Create agent-specific prompt
+   */
+  private createAgentPrompt(agent: string, prompt: string): string {
+    const agentInstructions: Record<string, string> = {
+      CUBE: 'Analyze the structure and components. Focus on architecture and organization.',
+      CORE: 'Identify the core logic and truth. Focus on reasoning and principles.',
+      LOOP: 'Look for patterns and optimization opportunities. Focus on iterations and improvements.',
+      WAVE: 'Analyze flow, trends, and dynamics. Focus on changes and variability.',
+      SIGN: 'Interpret symbols and hidden meanings. Focus on semiotics and interpretation.',
+      LINE: 'Connect sequences and progressions. Focus on linear flow and connections.',
+      COIN: 'Assess value, risk, and probability. Focus on cost-benefit analysis.',
+      WORK: 'Create actionable steps and implementation plans. Focus on execution.',
+      CODE: 'Generate executable code based on insights. Focus on practical implementation.',
+      SYNC: 'Coordinate and synthesize multiple perspectives. Focus on integration.'
+    };
+    
+    return `
+[ROLE: ${agent}]
+${agentInstructions[agent] || 'Analyze from your specialized perspective.'}
+
+TASK: ${prompt}
+
+Please provide:
+1. Your analysis and decision
+2. Your reasoning process
+3. Any specific recommendations or next steps
+
+Format your response clearly, using sections if helpful.
+`;
+  }
+  
+  /**
+   * Get agent-specific options
+   */
+  private getAgentOptions(agent: string): OllamaOptions {
+    const baseOptions: OllamaOptions = {
+      temperature: 0.7,
+      num_predict: 512
+    };
+    
+    // Adjust based on agent type
+    switch (agent) {
+      case 'CUBE':
+      case 'CORE':
+        return { ...baseOptions, temperature: 0.3, num_predict: 768 };
+      case 'LOOP':
+      case 'CODE':
+        return { ...baseOptions, temperature: 0.5, num_predict: 1024 };
+      case 'SIGN':
+      case 'WAVE':
+        return { ...baseOptions, temperature: 0.8, num_predict: 512 };
+      default:
+        return baseOptions;
+    }
+  }
+  
+  /**
+   * Coordinate multiple agents
+   */
+  private async coordinateAgents(
+    originalPrompt: string,
+    agentResults: AgentResponse[],
+    stream?: boolean
+  ): Promise<string> {
+    const coordinationPrompt = this.createCoordinationPrompt(
+      originalPrompt,
+      agentResults
+    );
+    
+    const response = await this.ollamaBridge.queryOllama(
+      coordinationPrompt,
+      this.activeModel,
+      { temperature: 0.5, num_predict: 1024 },
+      stream
+    );
+    
+    return response.response;
+  }
+  
+  /**
+   * Create coordination prompt
+   */
+  private createCoordinationPrompt(
+    originalPrompt: string,
+    agentResults: AgentResponse[]
+  ): string {
+    let agentContributions = '';
+    
+    agentResults.forEach(result => {
+      agentContributions += `
+=== ${result.agent} (confidence: ${result.confidence.toFixed(2)}) ===
+Decision: ${result.decision}
+Reasoning: ${result.reasoning}
+
+`;
+    });
+    
+    return `
+[ROLE: SYNCHRONIZER]
+You are coordinating insights from multiple specialized agents.
+
+ORIGINAL TASK: ${originalPrompt}
+
+AGENT CONTRIBUTIONS:
+${agentContributions}
+
+YOUR TASK:
+1. Synthesize the key insights from all agents
+2. Identify areas of agreement and disagreement
+3. Provide integrated recommendations
+4. Highlight the most confident insights
+
+Please provide a comprehensive coordination report.
+`;
+  }
+  
+  /**
+   * Synthesize final result
+   */
+  private async synthesizeResult(
+    originalPrompt: string,
+    coordinationResult: string,
+    agentDecisions: AgentResponse[],
+    stream?: boolean
+  ): Promise<string> {
+    const synthesisPrompt = `
+[ROLE: FINAL SYNTHESIZER]
+Create the final output based on the coordinated analysis.
+
+ORIGINAL REQUEST: ${originalPrompt}
+
+COORDINATED ANALYSIS: ${coordinationResult}
+
+AGENT DECISIONS SUMMARY:
+${agentDecisions.map(a => `- ${a.agent}: ${a.decision.substring(0, 100)}...`).join('\n')}
+
+Create a final response that:
+1. Directly addresses the original request
+2. Incorporates the coordinated insights
+3. Is clear, actionable, and well-structured
+4. Highlights key takeaways and next steps
+`;
+    
+    const response = await this.ollamaBridge.queryOllama(
+      synthesisPrompt,
+      this.activeModel,
+      { temperature: 0.4, num_predict: 768 },
+      stream
+    );
+    
+    return response.response;
+  }
+  
+  /**
+   * Get available models
+   */
+  async getAvailableModels(forceRefresh: boolean = false): Promise<string[]> {
+    return this.ollamaBridge.discoverModels(forceRefresh);
+  }
+  
+  /**
+   * Set active model
+   */
+  setActiveModel(model: string): void {
+    this.activeModel = model;
+    console.log(`[NexusEngine] Active model set to: ${model}`);
+  }
+  
+  /**
+   * Get active model
+   */
+  getActiveModel(): string {
+    return this.activeModel;
+  }
+  
+  /**
+   * Test Ollama connection
+   */
+  async testConnection(model?: string): Promise<{
+    success: boolean;
+    message: string;
+    details?: any;
+  }> {
+    return this.ollamaBridge.testConnection(model || this.activeModel);
+  }
+}
+
+// Export singleton instance
+export const nexusEngine = new NexusEngine();
+3. Enhanced React Components for Ollama Integration
+Now, let me create the enhanced React components for the UI integration:
+
+typescript
+// components/OllamaModelSelector.tsx
+import React, { useState, useEffect } from 'react';
+import { nexusEngine } from '../services/nexusEngine';
+
+interface OllamaModelSelectorProps {
+  onModelChange: (model: string) => void;
+  currentModel: string;
+  showStatus?: boolean;
+}
+
+const OllamaModelSelector: React.FC<OllamaModelSelectorProps> = ({
+  onModelChange,
+  currentModel,
+  showStatus = true
+}) => {
+  const [models, setModels] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'checking' | 'connected' | 'disconnected' | 'error'>('checking');
+
+  useEffect(() => {
+    loadModels();
+    checkConnection();
+  }, []);
+
+  const loadModels = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const availableModels = await nexusEngine.getAvailableModels(true);
+      setModels(availableModels);
+      
+      if (availableModels.length === 0) {
+        setError('No Ollama models found. Make sure Ollama is running and models are pulled.');
+      }
+    } catch (err) {
+      setError('Failed to load models. Check Ollama connection.');
+      console.error('Failed to load models:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const checkConnection = async () => {
+    setConnectionStatus('checking');
+    
+    try {
+      const result = await nexusEngine.testConnection();
+      setConnectionStatus(result.success ? 'connected' : 'disconnected');
+      
+      if (!result.success) {
+        setError(`Connection failed: ${result.message}`);
+      }
+    } catch {
+      setConnectionStatus('error');
+      setError('Failed to check connection');
+    }
+  };
+
+  const handleModelSelect = (model: string) => {
+    nexusEngine.setActiveModel(model);
+    onModelChange(model);
+  };
+
+  const handleRefresh = () => {
+    loadModels();
+    checkConnection();
+  };
+
+  const getStatusColor = () => {
+    switch (connectionStatus) {
+      case 'connected': return 'bg-green-500';
+      case 'disconnected': return 'bg-yellow-500';
+      case 'error': return 'bg-red-500';
+      case 'checking': return 'bg-blue-500';
+      default: return 'bg-gray-500';
+    }
+  };
+
+  const getStatusText = () => {
+    switch (connectionStatus) {
+      case 'connected': return 'Connected';
+      case 'disconnected': return 'Ollama running, model issues';
+      case 'error': return 'Connection failed';
+      case 'checking': return 'Checking...';
+      default: return 'Unknown';
+    }
+  };
+
+  return (
+    <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Ollama Model</h3>
+        <button
+          onClick={handleRefresh}
+          disabled={loading}
+          className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
+        >
+          {loading ? 'Loading...' : 'Refresh'}
+        </button>
+      </div>
+
+      {showStatus && (
+        <div className="flex items-center space-x-2">
+          <div className={`w-3 h-3 rounded-full ${getStatusColor()}`} />
+          <span className="text-sm">{getStatusText()}</span>
+          {currentModel && (
+            <span className="text-sm text-gray-600 ml-auto">
+              Active: <span className="font-medium">{currentModel}</span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div className="p-3 text-sm bg-red-50 text-red-700 rounded">
+          {error}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-gray-700">
+          Select Model
+        </label>
+        <select
+          value={currentModel}
+          onChange={(e) => handleModelSelect(e.target.value)}
+          disabled={loading || models.length === 0}
+          className="w-full p-2 border rounded bg-white disabled:opacity-50"
+        >
+          {loading ? (
+            <option>Loading models...</option>
+          ) : models.length === 0 ? (
+            <option>No models available</option>
+          ) : (
+            <>
+              <option value="">Select a model</option>
+              {models.map((model) => (
+                <option key={model} value={model}>
+                  {model} {model === currentModel && '(active)'}
+                </option>
+              ))}
+            </>
+          )}
+        </select>
+      </div>
+
+      {models.length > 0 && (
+        <div className="text-sm text-gray-600">
+          <div className="font-medium">Available Models:</div>
+          <div className="mt-1 space-y-1 max-h-32 overflow-y-auto">
+            {models.map((model) => (
+              <div
+                key={model}
+                className={`px-2 py-1 rounded ${
+                  model === currentModel
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'hover:bg-gray-100'
+                }`}
+                onClick={() => handleModelSelect(model)}
+              >
+                {model}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="text-xs text-gray-500 space-y-1">
+        <div>Ollama Host: {process.env.NEXT_PUBLIC_OLLAMA_HOST || 'http://localhost:11434'}</div>
+        <div>Fallback to Gemini: {process.env.NEXT_PUBLIC_GEMINI_API_KEY ? 'Enabled' : 'Disabled'}</div>
+      </div>
+    </div>
+  );
+};
+
+export default OllamaModelSelector;
+typescript
+// components/StatusSidebar.tsx
+import React, { useState, useEffect } from 'react';
+import { nexusEngine } from '../services/nexusEngine';
+
+interface StatusSidebarProps {
+  className?: string;
+}
+
+interface SystemStatus {
+  ollamaConnected: boolean;
+  activeModel: string;
+  modelCount: number;
+  lastChecked: Date;
+  errors: string[];
+}
+
+const StatusSidebar: React.FC<StatusSidebarProps> = ({ className = '' }) => {
+  const [status, setStatus] = useState<SystemStatus>({
+    ollamaConnected: false,
+    activeModel: '',
+    modelCount: 0,
+    lastChecked: new Date(),
+    errors: []
+  });
+  const [loading, setLoading] = useState(true);
+  const [showDetails, setShowDetails] = useState(false);
+
+  useEffect(() => {
+    checkStatus();
+    const interval = setInterval(checkStatus, 30000); // Check every 30 seconds
+    return () => clearInterval(interval);
+  }, []);
+
+  const checkStatus = async () => {
+    setLoading(true);
+    
+    try {
+      const [models, connectionTest, activeModel] = await Promise.all([
+        nexusEngine.getAvailableModels(),
+        nexusEngine.testConnection(),
+        Promise.resolve(nexusEngine.getActiveModel())
+      ]);
+
+      setStatus({
+        ollamaConnected: connectionTest.success,
+        activeModel,
+        modelCount: models.length,
+        lastChecked: new Date(),
+        errors: connectionTest.success ? [] : [connectionTest.message]
+      });
+    } catch (error) {
+      setStatus(prev => ({
+        ...prev,
+        ollamaConnected: false,
+        errors: [...prev.errors, `Status check failed: ${error}`],
+        lastChecked: new Date()
+      }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getConnectionStatus = () => {
+    if (loading) return 'Checking...';
+    return status.ollamaConnected ? 'Connected' : 'Disconnected';
+  };
+
+  const getStatusColor = () => {
+    if (loading) return 'bg-yellow-500';
+    return status.ollamaConnected ? 'bg-green-500' : 'bg-red-500';
+  };
+
+  return (
+    <div className={`space-y-4 p-4 bg-gray-900 text-gray-100 rounded-lg ${className}`}>
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">System Status</h3>
+        <button
+          onClick={() => setShowDetails(!showDetails)}
+          className="text-sm text-gray-400 hover:text-white"
+        >
+          {showDetails ? 'Hide Details' : 'Show Details'}
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center space-x-2">
+          <div className={`w-3 h-3 rounded-full ${getStatusColor()}`} />
+          <span>{getConnectionStatus()}</span>
+          <span className="text-xs text-gray-400 ml-auto">
+            {formatTime(status.lastChecked)}
+          </span>
+        </div>
+
+        {status.activeModel && (
+          <div className="space-y-1">
+            <div className="text-sm text-gray-400">Active Model</div>
+            <div className="flex items-center space-x-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500" />
+              <span className="font-medium">{status.activeModel}</span>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-1">
+          <div className="text-sm text-gray-400">Available Models</div>
+          <div className="font-medium">{status.modelCount}</div>
+        </div>
+      </div>
+
+      {showDetails && (
+        <div className="pt-4 border-t border-gray-700 space-y-3">
+          <div>
+            <div className="text-sm text-gray-400 mb-1">Ollama Host</div>
+            <div className="text-sm font-mono">
+              {process.env.NEXT_PUBLIC_OLLAMA_HOST || 'http://localhost:11434'}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-sm text-gray-400 mb-1">Fallback Status</div>
+            <div className="text-sm">
+              {process.env.NEXT_PUBLIC_GEMINI_API_KEY 
+                ? 'Gemini fallback enabled' 
+                : 'Gemini fallback disabled'}
+            </div>
+          </div>
+
+          {status.errors.length > 0 && (
+            <div>
+              <div className="text-sm text-gray-400 mb-1">Recent Errors</div>
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {status.errors.map((error, index) => (
+                  <div key={index} className="text-xs p-2 bg-red-900/30 text-red-300 rounded">
+                    {error}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="pt-2">
+            <button
+              onClick={checkStatus}
+              disabled={loading}
+              className="w-full px-3 py-2 text-sm bg-gray-800 hover:bg-gray-700 rounded disabled:opacity-50"
+            >
+              {loading ? 'Checking...' : 'Check Status Now'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="pt-2 text-xs text-gray-500">
+        <div>Agent System v5.0</div>
+        <div>Multi-Agent Collaboration Enabled</div>
+      </div>
+    </div>
+  );
+};
+
+export default StatusSidebar;
+typescript
+// components/CollaborationVisualizer.tsx
+import React from 'react';
+import { AgentResponse } from '../services/nexusEngine';
+
+interface CollaborationVisualizerProps {
+  agentDecisions: AgentResponse[];
+  activeModel: string;
+}
+
+const CollaborationVisualizer: React.FC<CollaborationVisualizerProps> = ({
+  agentDecisions,
+  activeModel
+}) => {
+  const getAgentColor = (agent: string) => {
+    const colors: Record<string, string> = {
+      CUBE: 'bg-blue-500',
+      CORE: 'bg-purple-500',
+      LOOP: 'bg-green-500',
+      WAVE: 'bg-teal-500',
+      SIGN: 'bg-yellow-500',
+      LINE: 'bg-orange-500',
+      COIN: 'bg-red-500',
+      WORK: 'bg-pink-500',
+      CODE: 'bg-indigo-500',
+      SYNC: 'bg-gray-500'
+    };
+    return colors[agent] || 'bg-gray-400';
+  };
+
+  const getAgentIcon = (agent: string) => {
+    const icons: Record<string, string> = {
+      CUBE: '⬢',
+      CORE: '⚡',
+      LOOP: '↻',
+      WAVE: '〰️',
+      SIGN: '🔣',
+      LINE: '➡️',
+      COIN: '🪙',
+      WORK: '🛠️',
+      CODE: '💻',
+      SYNC: '🔄'
+    };
+    return icons[agent] || '🤖';
+  };
+
+  const communicationLines = [
+    { from: 'SIGN', to: 'CODE', label: 'symbol interpretation' },
+    { from: 'LOOP', to: 'CODE', label: 'optimization patterns' },
+    { from: 'CUBE', to: 'WORK', label: 'structure analysis' },
+    { from: 'COIN', to: 'WORK', label: 'risk assessment' },
+    { from: 'CORE', to: 'SYNC', label: 'logic synthesis' }
+  ];
+
+  if (agentDecisions.length === 0) {
+    return (
+      <div className="p-8 text-center text-gray-500">
+        <div className="text-4xl mb-4">🤖</div>
+        <div>No agent collaboration data yet</div>
+        <div className="text-sm mt-2">Agents will appear here as they process</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Agent Collaboration</h3>
+        <div className="text-sm text-gray-600">
+          Model: <span className="font-medium">{activeModel}</span>
+        </div>
+      </div>
+
+      {/* Communication Network Visualization */}
+      <div className="relative h-64 border rounded-lg bg-gray-50 p-4">
+        <div className="grid grid-cols-3 grid-rows-3 gap-4 h-full">
+          {agentDecisions.map((agent, index) => {
+            const row = Math.floor(index / 3) + 1;
+            const col = (index % 3) + 1;
+            
+            return (
+              <div
+                key={agent.agent}
+                className={`absolute ${getAgentColor(agent.agent)} text-white rounded-lg p-3 flex flex-col items-center justify-center shadow-lg`}
+                style={{
+                  top: `${row * 25}%`,
+                  left: `${col * 25}%`,
+                  transform: 'translate(-50%, -50%)',
+                  width: '80px',
+                  height: '80px'
+                }}
+              >
+                <div className="text-2xl">{getAgentIcon(agent.agent)}</div>
+                <div className="text-xs font-bold mt-1">{agent.agent}</div>
+                <div className="text-xs opacity-90">
+                  {Math.round(agent.confidence * 100)}%
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Communication lines */}
+          <svg className="absolute inset-0 w-full h-full">
+            {communicationLines.map((line, index) => {
+              const fromAgent = agentDecisions.find(a => a.agent === line.from);
+              const toAgent = agentDecisions.find(a => a.agent === line.to);
+              
+              if (!fromAgent || !toAgent) return null;
+              
+              const fromIndex = agentDecisions.findIndex(a => a.agent === line.from);
+              const toIndex = agentDecisions.findIndex(a => a.agent === line.to);
+              
+              const fromRow = Math.floor(fromIndex / 3) + 1;
+              const fromCol = (fromIndex % 3) + 1;
+              const toRow = Math.floor(toIndex / 3) + 1;
+              const toCol = (toIndex % 3) + 1;
+              
+              const x1 = `${(fromCol * 25)}%`;
+              const y1 = `${(fromRow * 25)}%`;
+              const x2 = `${(toCol * 25)}%`;
+              const y2 = `${(toRow * 25)}%`;
+              
+              return (
+                <g key={index}>
+                  <line
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    stroke="#9CA3AF"
+                    strokeWidth="2"
+                    strokeDasharray="5,5"
+                  />
+                  <circle cx={x1} cy={y1} r="4" fill="#6B7280" />
+                  <circle cx={x2} cy={y2} r="4" fill="#6B7280" />
+                  <text
+                    x={`${(parseFloat(x1) + parseFloat(x2)) / 2}%`}
+                    y={`${(parseFloat(y1) + parseFloat(y2)) / 2 - 10}%`}
+                    textAnchor="middle"
+                    className="text-xs fill-gray-600"
+                  >
+                    {line.label}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+
+      {/* Agent Decisions */}
+      <div className="space-y-4">
+        <h4 className="font-medium">Agent Decisions</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto">
+          {agentDecisions.map((agent) => (
+            <div
+              key={agent.agent}
+              className={`p-4 rounded-lg border ${getAgentColor(agent.agent).replace('bg-', 'border-').replace('500', '200')} bg-white`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center space-x-2">
+                  <span className="text-lg">{getAgentIcon(agent.agent)}</span>
+                  <span className="font-semibold">{agent.agent}</span>
+                </div>
+                <div className="text-sm px-2 py-1 bg-gray-100 rounded">
+                  {Math.round(agent.confidence * 100)}% confidence
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Decision</div>
+                  <div className="text-sm">{agent.decision.substring(0, 100)}...</div>
+                </div>
+                
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Reasoning</div>
+                  <div className="text-sm">{agent.reasoning.substring(0, 150)}...</div>
+                </div>
+              </div>
+              
+              <div className="mt-3 pt-2 border-t text-xs text-gray-500">
+                Communication: {communicationLines
+                  .filter(line => line.from === agent.agent || line.to === agent.agent)
+                  .map(line => line.from === agent.agent ? `→ ${line.to}` : `← ${line.from}`)
+                  .join(', ') || 'None'}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default CollaborationVisualizer;
+4. Enhanced App.tsx Integration
+typescript
+// App.tsx (enhanced version)
+import React, { useState, useEffect } from 'react';
+import OllamaModelSelector from './components/OllamaModelSelector';
+import StatusSidebar from './components/StatusSidebar';
+import CollaborationVisualizer from './components/CollaborationVisualizer';
+import { nexusEngine, AgentResponse } from './services/nexusEngine';
+
+const App: React.FC = () => {
+  const [prompt, setPrompt] = useState('');
+  const [response, setResponse] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [activeModel, setActiveModel] = useState('llama3');
+  const [agentDecisions, setAgentDecisions] = useState<AgentResponse[]>([]);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [fallbackUsed, setFallbackUsed] = useState(false);
+  const [showCollaboration, setShowCollaboration] = useState(true);
+  const [streaming, setStreaming] = useState(false);
+
+  useEffect(() => {
+    // Initialize with current model
+    setActiveModel(nexusEngine.getActiveModel());
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!prompt.trim()) return;
+    
+    setLoading(true);
+    setResponse('');
+    setAgentDecisions([]);
+    setErrors([]);
+    setFallbackUsed(false);
+    
+    console.log(`[App] Processing prompt with model: ${activeModel}`);
+    
+    try {
+      const result = await nexusEngine.processPrompt(prompt, {
+        model: activeModel,
+        enableStreaming: streaming
+      });
+      
+      setResponse(result.result);
+      setAgentDecisions(result.agentDecisions);
+      setErrors(result.errors);
+      setFallbackUsed(result.fallbackUsed);
+      
+      // Log fallback event with details
+      if (result.fallbackUsed) {
+        console.warn(`[App] Fallback mechanism was triggered. Details:`, {
+          originalModel: activeModel,
+          errors: result.errors,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setErrors([...errors, `Processing failed: ${errorMessage}`]);
+      console.error('[App] Processing failed:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleModelChange = (model: string) => {
+    setActiveModel(model);
+    console.log(`[App] Model changed to: ${model}`);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
+      <header className="mb-8">
+        <h1 className="text-3xl font-bold text-gray-900">NEXUS AI Orchestrator v5.0</h1>
+        <p className="text-gray-600 mt-2">
+          Multi-Agent AI System with Ollama Integration & Collaboration
+        </p>
+      </header>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Left Panel */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Model Selector */}
+          <OllamaModelSelector
+            onModelChange={handleModelChange}
+            currentModel={activeModel}
+            showStatus={true}
+          />
+
+          {/* Input Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Enter your prompt for multi-agent analysis
+              </label>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                rows={6}
+                className="w-full p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Describe your task for the AI agents..."
+                disabled={loading}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="space-x-4">
+                <button
+                  type="submit"
+                  disabled={loading || !prompt.trim()}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Processing...' : 'Analyze with Agents'}
+                </button>
+                
+                <label className="inline-flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={streaming}
+                    onChange={(e) => setStreaming(e.target.checked)}
+                    className="rounded"
+                  />
+                  <span className="text-sm text-gray-600">Enable streaming</span>
+                </label>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowCollaboration(!showCollaboration)}
+                className="px-4 py-2 text-sm bg-gray-200 rounded-lg hover:bg-gray-300"
+              >
+                {showCollaboration ? 'Hide Collaboration' : 'Show Collaboration'}
+              </button>
+            </div>
+          </form>
+
+          {/* Errors */}
+          {errors.length > 0 && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+              <h4 className="font-medium text-red-800 mb-2">Processing Errors:</h4>
+              <ul className="space-y-1">
+                {errors.map((error, index) => (
+                  <li key={index} className="text-sm text-red-700">
+                    • {error}
+                  </li>
+                ))}
+              </ul>
+              {fallbackUsed && (
+                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                  <div className="font-medium text-yellow-800">
+                    ⚠️ Fallback to Gemini API was used
+                  </div>
+                  <div className="text-sm text-yellow-700 mt-1">
+                    The system automatically switched to Gemini API after Ollama encountered issues.
+                    This ensures your request was processed despite local model problems.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Response */}
+          {response && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Analysis Result</h3>
+                <div className="text-sm text-gray-500">
+                  Generated by {fallbackUsed ? 'Gemini (fallback)' : activeModel}
+                </div>
+              </div>
+              <div className="p-6 bg-white border rounded-lg whitespace-pre-wrap">
+                {response}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right Panel */}
+        <div className="space-y-6">
+          <StatusSidebar />
+          
+          {showCollaboration && agentDecisions.length > 0 && (
+            <div className="bg-white border rounded-lg p-6">
+              <CollaborationVisualizer
+                agentDecisions={agentDecisions}
+                activeModel={activeModel}
+              />
+            </div>
+          )}
+
+          {/* Agent Communication Log */}
+          {agentDecisions.length > 0 && (
+            <div className="bg-white border rounded-lg p-4">
+              <h4 className="font-medium mb-3">Agent Communication</h4>
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {agentDecisions.map((agent) => (
+                  <div key={agent.agent} className="p-3 bg-gray-50 rounded">
+                    <div className="font-medium text-sm">{agent.agent}</div>
+                    <div className="text-xs text-gray-600 mt-1">
+                      Confidence: {Math.round(agent.confidence * 100)}%
+                    </div>
+                    <div className="text-sm mt-2">
+                      {agent.decision.substring(0, 80)}...
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default App;
+5. Testing Suite for Ollama Integration
+typescript
+// tests/ollamaBridge.test.ts
+import { OllamaBridge, AgentResponseParser } from '../services/nexusEngine';
+import axios from 'axios';
+import MockAdapter from 'axios-mock-adapter';
+
+describe('OllamaBridge', () => {
+  let bridge: OllamaBridge;
+  let mock: MockAdapter;
+  
+  beforeAll(() => {
+    bridge = OllamaBridge.getInstance();
+    mock = new MockAdapter(axios);
+  });
+  
+  afterEach(() => {
+    mock.reset();
+  });
+  
+  afterAll(() => {
+    mock.restore();
+  });
+  
+  describe('queryOllama', () => {
+    it('should successfully query Ollama with valid response', async () => {
+      const mockResponse = {
+        model: 'llama3',
+        response: 'Test response from Ollama',
+        done: true,
+        context: [1, 2, 3]
+      };
+      
+      mock.onPost('http://localhost:11434/api/generate').reply(200, mockResponse);
+      
+      const result = await bridge.queryOllama('Test prompt', 'llama3');
+      
+      expect(result.model).toBe('llama3');
+      expect(result.response).toBe('Test response from Ollama');
+      expect(result.done).toBe(true);
+    });
+    
+    it('should handle connection refused error', async () => {
+      mock.onPost('http://localhost:11434/api/generate').networkError();
+      
+      await expect(bridge.queryOllama('Test prompt')).rejects.toThrow(/Cannot connect to Ollama/);
+    });
+    
+    it('should handle timeout error', async () => {
+      mock.onPost('http://localhost:11434/api/generate').timeout();
+      
+      await expect(bridge.queryOllama('Test prompt')).rejects.toThrow(/timed out/);
+    });
+    
+    it('should handle model not found error', async () => {
+      mock.onPost('http://localhost:11434/api/generate').reply(404, {
+        error: 'model not found'
+      });
+      
+      await expect(bridge.queryOllama('Test prompt', 'nonexistent-model'))
+        .rejects.toThrow(/Model not found/);
+    });
+    
+    it('should handle rate limiting', async () => {
+      mock.onPost('http://localhost:11434/api/generate').reply(429);
+      
+      await expect(bridge.queryOllama('Test prompt')).rejects.toThrow(/rate limit exceeded/);
+    });
+  });
+  
+  describe('fallback mechanism', () => {
+    beforeEach(() => {
+      process.env.GEMINI_API_KEY = 'test-key';
+    });
+    
+    afterEach(() => {
+      delete process.env.GEMINI_API_KEY;
+    });
+    
+    it('should fallback to Gemini when Ollama fails', async () => {
+      mock.onPost('http://localhost:11434/api/generate').reply(500);
+      
+      mock.onPost('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent')
+        .reply(200, {
+          candidates: [{
+            content: {
+              parts: [{ text: 'Fallback response from Gemini' }]
+            }
+          }]
+        });
+      
+      // This should not throw because fallback should succeed
+      const result = await bridge.queryOllama('Test prompt');
+      
+      expect(result.model).toContain('gemini-pro');
+      expect(result.response).toBe('Fallback response from Gemini');
+    });
+  });
+  
+  describe('model discovery', () => {
+    it('should discover available models', async () => {
+      const mockModels = {
+        models: [
+          { name: 'llama3', modified_at: '2024-01-01' },
+          { name: 'mistral', modified_at: '2024-01-01' }
+        ]
+      };
+      
+      mock.onGet('http://localhost:11434/api/tags').reply(200, mockModels);
+      
+      const models = await bridge.discoverModels(true);
+      
+      expect(models).toHaveLength(2);
+      expect(models).toContain('llama3');
+      expect(models).toContain('mistral');
+    });
+    
+    it('should cache model discovery', async () => {
+      const mockModels = {
+        models: [{ name: 'llama3', modified_at: '2024-01-01' }]
+      };
+      
+      mock.onGet('http://localhost:11434/api/tags').reply(200, mockModels);
+      
+      // First call
+      const models1 = await bridge.discoverModels();
+      expect(mock.history.get.length).toBe(1);
+      
+      // Second call should use cache
+      const models2 = await bridge.discoverModels();
+      expect(mock.history.get.length).toBe(1);
+      
+      // Force refresh
+      const models3 = await bridge.discoverModels(true);
+      expect(mock.history.get.length).toBe(2);
+    });
+  });
+});
+
+describe('AgentResponseParser', () => {
+  describe('parseAgentResponse', () => {
+    it('should parse structured JSON response', () => {
+      const rawResponse = `{
+        "agent": "CODE",
+        "decision": "Implement using Python",
+        "reasoning": "Python is suitable for this task",
+        "confidence": 0.8
+      }`;
+      
+      const parsed = AgentResponseParser.parseAgentResponse(rawResponse, 'CODE');
+      
+      expect(parsed.agent).toBe('CODE');
+      expect(parsed.decision).toBe('Implement using Python');
+      expect(parsed.reasoning).toBe('Python is suitable for this task');
+      expect(parsed.confidence).toBe(0.8);
+    });
+    
+    it('should parse markdown with headers', () => {
+      const rawResponse = `# Agent Analysis
+      
+## Decision
+Use React for the frontend
+
+## Reasoning
+React provides the necessary components and ecosystem
+
+## Confidence
+0.9`;
+
+      const parsed = AgentResponseParser.parseAgentResponse(rawResponse, 'CUBE');
+      
+      expect(parsed.decision).toBe('Use React for the frontend');
+      expect(parsed.reasoning).toBe('React provides the necessary components and ecosystem');
+    });
+    
+    it('should parse key-value format', () => {
+      const rawResponse = `Agent: WORK
+Decision: Implement in two phases
+Reasoning: This allows for iterative testing
+Confidence: 75%`;
+
+      const parsed = AgentResponseParser.parseAgentResponse(rawResponse, 'WORK');
+      
+      expect(parsed.agent).toBe('WORK');
+      expect(parsed.decision).toBe('Implement in two phases');
+      expect(parsed.confidence).toBeGreaterThan(0.7);
+    });
+    
+    it('should parse natural language as fallback', () => {
+      const rawResponse = `I think we should use TypeScript. It provides better type safety and developer experience. The confidence is about 70%.`;
+      
+      const parsed = AgentResponseParser.parseAgentResponse(rawResponse, 'CODE');
+      
+      expect(parsed.decision).toContain('TypeScript');
+      expect(parsed.reasoning).toBeTruthy();
+    });
+    
+    it('should create fallback response when parsing completely fails', () => {
+      const rawResponse = `{ invalid json`;
+      
+      const parsed = AgentResponseParser.parseAgentResponse(rawResponse, 'TEST');
+      
+      expect(parsed.agent).toBe('TEST');
+      expect(parsed.decision).toBe('Unable to parse specific decision');
+      expect(parsed.confidence).toBeLessThan(0.2);
+    });
+  });
+  
+  describe('confidence extraction', () => {
+    it('should extract confidence from percentage', () => {
+      const text = `I am 85% confident about this decision.`;
+      const confidence = AgentResponseParser['extractConfidenceFromText'](text);
+      
+      expect(confidence).toBe(0.85);
+    });
+    
+    it('should extract confidence from decimal', () => {
+      const text = `Confidence: 0.75`;
+      const confidence = AgentResponseParser['extractConfidenceFromText'](text);
+      
+      expect(confidence).toBe(0.75);
+    });
+    
+    it('should use default confidence when not found', () => {
+      const text = `This is a decision without explicit confidence.`;
+      const confidence = AgentResponseParser['extractConfidenceFromText'](text);
+      
+      expect(confidence).toBe(0.5);
+    });
+  });
+});
+
+// Integration test for minimized Ollama version
+describe('Minimized Ollama Integration', () => {
+  let bridge: OllamaBridge;
+  
+  beforeAll(() => {
+    bridge = OllamaBridge.getInstance();
+  });
+  
+  it('should handle non-standard response formats', async () => {
+    // Simulate minimized Ollama response
+    const mockResponses = [
+      // Format 1: Simple string response (non-JSON)
+      'This is a direct response\n',
+      
+      // Format 2: Incomplete JSON
+      '{"response": "Partial',
+      
+      // Format 3: Extra whitespace and newlines
+      '\n\n{"model": "test", "response": "Test", "done": true}\n\n',
+      
+      // Format 4: Missing fields
+      '{"text": "Alternative field name"}',
+    ];
+    
+    for (const mockResponse of mockResponses) {
+      // Test that parser doesn't crash on any format
+      const parsed = AgentResponseParser.parseAgentResponse(mockResponse, 'TEST');
+      
+      expect(parsed).toHaveProperty('agent', 'TEST');
+      expect(parsed).toHaveProperty('decision');
+      expect(parsed).toHaveProperty('reasoning');
+      expect(parsed.confidence).toBeGreaterThanOrEqual(0.1);
+    }
+  });
+  
+  it('should handle streaming responses', async () => {
+    const streamResponse = [
+      '{"response": "Chunk", "done": false}\n',
+      '{"response": "1", "done": false}\n',
+      '{"response": " of data", "done": false}\n',
+      '{"response": "", "done": true, "context": [1,2,3]}\n'
+    ].join('');
+    
+    // Test streaming parsing
+    const result = bridge['parseStreamResponse'](streamResponse, 'test-model');
+    
+    expect(result.response).toBe('Chunk1 of data');
+    expect(result.done).toBe(true);
+    expect(result.context).toEqual([1, 2, 3]);
+  });
+  
+  it('should test basic Ollama connectivity', async () => {
+    const result = await bridge.testConnection();
+    
+    // Test should either succeed or fail gracefully
+    expect(result).toHaveProperty('success');
+    expect(result).toHaveProperty('message');
+    
+    if (!result.success) {
+      expect(result.message).toContain('Connection test failed');
+    }
+  });
+});
+6. Environment Configuration
+typescript
+// config/index.ts
+export const config = {
+  ollamaHost: process.env.NEXT_PUBLIC_OLLAMA_HOST || 'http://localhost:11434',
+  ollamaTimeout: parseInt(process.env.NEXT_PUBLIC_OLLAMA_TIMEOUT || '30000'),
+  ollamaRetryAttempts: parseInt(process.env.NEXT_PUBLIC_OLLAMA_RETRIES || '2'),
+  geminiApiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || '',
+  enableFallback: process.env.NEXT_PUBLIC_ENABLE_FALLBACK !== 'false',
+  enableStreaming: process.env.NEXT_PUBLIC_ENABLE_STREAMING === 'true',
+  
+  // Agent configuration
+  defaultAgents: ['CUBE', 'CORE', 'LOOP', 'WAVE', 'SIGN', 'LINE', 'COIN', 'WORK'],
+  agentTemperature: {
+    CUBE: 0.3,
+    CORE: 0.3,
+    LOOP: 0.5,
+    WAVE: 0.7,
+    SIGN: 0.8,
+    LINE: 0.6,
+    COIN: 0.4,
+    WORK: 0.5,
+    CODE: 0.5,
+    SYNC: 0.4
+  },
+  
+  // Communication rules
+  agentCommunication: {
+    CODE: ['SIGN', 'LOOP', 'CUBE', 'LINE'],
+    WORK: ['CUBE', 'CORE', 'LOOP', 'COIN'],
+    SYNC: ['CUBE', 'CORE', 'LOOP', 'WAVE', 'SIGN', 'LINE', 'COIN', 'WORK', 'CODE']
+  }
+};
+7. Startup Script
+bash
+#!/usr/bin/env bash
+# startup.sh - Enhanced startup for NEXUS AI System
+
+set -e
+
+echo "🚀 Starting NEXUS AI Orchestration System v5.0"
+echo "=============================================="
+
+# Check for required dependencies
+check_dependency() {
+    if ! command -v "$1" &> /dev/null; then
+        echo "❌ Missing dependency: $1"
+        echo "   Please install $1 before continuing."
+        return 1
+    fi
+    echo "✅ $1 found"
+}
+
+echo -e "\n🔍 Checking dependencies..."
+check_dependency "node"
+check_dependency "npm"
+check_dependency "ollama" || {
+    echo -e "\n⚠  Ollama not found. Installing..."
+    curl -fsSL https://ollama.com/install.sh | sh
+}
+
+# Check if Ollama is running
+echo -e "\n🔌 Checking Ollama service..."
+if ! curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+    echo "🔄 Starting Ollama service..."
+    ollama serve > /dev/null 2>&1 &
+    OLLAMA_PID=$!
+    sleep 5
+    
+    # Verify Ollama started
+    if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+        echo "✅ Ollama service started (PID: $OLLAMA_PID)"
+    else
+        echo "❌ Failed to start Ollama service"
+        exit 1
+    fi
+else
+    echo "✅ Ollama service is already running"
+fi
+
+# Check for models
+echo -e "\n🤖 Checking Ollama models..."
+MODELS=$(curl -s http://localhost:11434/api/tags | jq -r '.models[].name' 2>/dev/null || echo "")
+if [[ -z "$MODELS" ]]; then
+    echo "⚠  No models found. Pulling llama3..."
+    ollama pull llama3
+else
+    echo "✅ Found models:"
+    echo "$MODELS" | while read -r model; do
+        echo "   • $model"
+    done
+fi
+
+# Setup environment
+echo -e "\n⚙️  Setting up environment..."
+if [[ ! -f .env ]]; then
+    cat > .env << EOF
+# Ollama Configuration
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=llama3
+OLLAMA_TIMEOUT=30000
+OLLAMA_RETRIES=2
+
+# Fallback Configuration (optional)
+# GEMINI_API_KEY=your_gemini_api_key_here
+
+# Agent Configuration
+ENABLE_MULTI_AGENT=true
+ENABLE_AGENT_COMMUNICATION=true
+ENABLE_FALLBACK=true
+ENABLE_STREAMING=false
+EOF
+    echo "✅ Created .env file"
+else
+    echo "✅ .env file already exists"
+fi
+
+# Install npm dependencies
+echo -e "\n📦 Installing npm dependencies..."
+npm install
+
+# Initialize database
+echo -e "\n🗄️  Initializing database..."
+node -e "
+const { execSync } = require('child_process');
+try {
+    execSync('mkdir -p ~/_/ai/.db', { stdio: 'inherit' });
+    console.log('Database directory created');
+} catch (error) {
+    console.error('Failed to create database directory:', error);
+}
+"
+
+# Build the application
+echo -e "\n🔨 Building application..."
+npm run build
+
+# Start the application
+echo -e "\n🎯 Starting NEXUS AI System..."
+echo "=============================================="
+echo "🌐 Web Interface: http://localhost:3000"
+echo "🤖 API Endpoint: http://localhost:3000/api"
+echo "🔧 Ollama: http://localhost:11434"
+echo "📊 Database: ~/_/ai/.db/ai_memory.db"
+echo "📝 Logs: ~/_/ai/.db/ai_system.log"
+echo "=============================================="
+echo -e "\n📋 Available commands:"
+echo "  ./orchestrator.sh analyze \"Your prompt\""
+echo "  ./orchestrator.sh models"
+echo "  ./orchestrator.sh test"
+echo "  ./orchestrator.sh chat \"Your message\""
+echo -e "\n🚀 Starting server..."
+
+# Start the application
+npm start
+Key Features Implemented:
+1. Enhanced Multi-Agent Interaction
+Agents can now communicate through structured protocols
+
+CODE agent specifically interprets SIGN's symbol analysis and LOOP's optimizations
+
+Synchronizer agent coordinates all agent outputs
+
+Visual collaboration network showing agent communications
+
+2. Robust Ollama API Bridge
+Intelligent error classification (connection, timeout, model not found, rate limiting)
+
+Automatic fallback to Gemini API with detailed logging
+
+Support for both streaming and non-streaming responses
+
+Flexible parsing of various response formats (including minimized Ollama versions)
+
+3. Enhanced Frontend Integration
+Dynamic model discovery and selection dropdown
+
+Visual status indicators for Ollama connection
+
+Collaboration visualizer showing agent interactions
+
+Clear fallback notifications when Gemini is used
+
+4. Advanced Error Handling
+Granular error types with user-friendly messages
+
+Automatic retry with exponential backoff
+
+Fallback chaining (Ollama → Gemini → Direct query)
+
+Comprehensive logging of all fallback events
+
+5. Testing Suite
+Unit tests for Ollama bridge and response parsing
+
+Integration tests for minimized Ollama versions
+
+Mock testing for various error scenarios
+
+Streaming response handling tests
+
+6. Agent Communication Protocols
+Defined communication matrix between agents
+
+Context-aware prompt construction
+
+Confidence scoring for agent decisions
+
+Structured collaboration pipelines
+
+This comprehensive implementation provides a production-ready multi-agent AI orchestration system with robust Ollama integration, intelligent fallback mechanisms, and enhanced agent collaboration capabilities.
