@@ -1,6 +1,0 @@
-[submodule "ai/nemodian_base"]
-        path = ai/nemodian_base
-        url = https://github.com/Loopshape/_NIX-SYSOP-AI-AGENT
-[submodule "core/loader"]
-        path = core/loader
-        url = https://github.com/Loopshape/loader
