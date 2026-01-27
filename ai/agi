@@ -1,4 +1,5 @@
-qq#!/usr/bin/env bash
+#!/usr/bin/env bash
+
 # ~/bin/ai - Local AI CLI for Ollama
 
 set -euo pipefail

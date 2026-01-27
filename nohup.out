@@ -894,3 +894,5 @@ time=2026-01-01T13:56:44.751+01:00 level=INFO source=server.go:1497 msg="abortin
 [GIN] 2026/01/01 - 13:56:46 | 500 |        34m49s |       127.0.0.1 | POST     "/api/generate"
 [GIN] 2026/01/01 - 13:56:46 | 500 |        34m48s |       127.0.0.1 | POST     "/api/generate"
 [GIN] 2026/01/01 - 13:57:08 | 500 |        23m10s |       127.0.0.1 | POST     "/api/generate"
+Error: listen tcp 127.0.0.1:11434: bind: address already in use
+Error: listen tcp 127.0.0.1:11434: bind: address already in use

@@ -8,3 +8,7 @@ flask
 
 # For managing environment variables
 python-dotenv
+
+asyncio 
+pathlib 
+pygments
