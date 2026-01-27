@@ -1,1 +1,18 @@
-/home/loop/.repository/ai-runtime/ai-go
+#!/usr/bin/env bash
+
+HOST="nexus.example.com"
+PORT=8081
+USER="monitor"
+PASS="monitorPassword"
+
+# Grab the JSON
+JSON=$(curl -s -u "$USER:$PASS" "http://$HOST:$PORT/service/rest/v1/status/check")
+
+# Look for any "healthy":false
+if echo "$JSON" | grep -q '"healthy":false'; then
+    echo "$(date): Nexus health check FAILED"
+    # Insert your alerting mechanism here (email, Slack, PagerDuty, etc.)
+else
+    echo "$(date): Nexus healthy"
+fi
+

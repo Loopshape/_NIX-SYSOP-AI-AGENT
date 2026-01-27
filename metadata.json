@@ -1,1 +1,5 @@
-/home/loop/.repository/ai-runtime/metadata.json
+{
+  "name": "Gemini Code Reviewer",
+  "description": "An intelligent code reviewer powered by the Gemini API.",
+  "requestFramePermissions": []
+}

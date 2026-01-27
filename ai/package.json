@@ -1,1 +1,9 @@
-../package.json
+{
+  "dependencies": {
+    "base58": "^2.0.1",
+    "bip39": "^3.1.0",
+    "blockchain": "^1.0.6",
+    "bs58": "^6.0.0",
+    "node-fetch": "^3.3.2"
+  }
+}

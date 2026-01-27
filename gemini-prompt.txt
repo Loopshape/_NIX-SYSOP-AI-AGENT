@@ -1,1 +1,267 @@
-/home/loop/.repository/ai-runtime/gemini-prompt.txt
+GEMINI-CLI MASTER EXECUTION PROMPT
+
+Project Codename: NEXUS
+Target Version: v3.1 (minimal delta from v3.0)
+
+ROLE & OPERATING MODE
+
+You are operating as a senior systems engineer and runtime architect.
+
+You must:
+
+Execute instructions without asking questions
+
+Avoid speculative features
+
+Preserve backward compatibility
+
+Prefer determinism, idempotency, and unattended execution
+
+Produce implementation-ready artifacts
+
+You are allowed to:
+
+Refactor structure
+
+Extract pure cores
+
+Harden lifecycle and startup
+
+Inline modules into a single file if required
+
+You must not:
+
+Change agent semantics
+
+Alter memory schema
+
+Introduce new external dependencies
+
+Split into multiple files unless explicitly instructed
+
+CONTEXT (AUTHORITATIVE)
+
+The system is a WSL / Linux / Docker compatible AI orchestration runtime with:
+
+CLI entry: ~/_/ai/ai.sh
+
+Docker image: nexus/base:latest
+
+Runtime memory: SQLite (WAL enabled)
+
+Optional Ollama inference (OLLAMA_HOST)
+
+8 agents arranged in a 2π / 8-phase model:
+
+Core, Cube, Wave, Loop, Coin, Line, Sign, Work
+
+A coordinator/orchestrator controlling concurrency and phase order
+
+Existing CLI commands:
+
+reason, recall, stats, cleanup, export, status, agents, models
+
+Current state is v3.0, functional but monolithic.
+
+OBJECTIVES (ALL REQUIRED)
+
+You must perform all of the following:
+
+1. FORMALIZE SPECIFICATION
+
+Produce a versioned formal specification:
+
+Identifier: NEXUS-AI-ORCH
+
+Version: 3.0
+
+Include:
+
+Purpose
+
+Runtime architecture
+
+CLI contract
+
+State & memory model
+
+Health and readiness signals
+
+Determinism guarantees
+
+This spec must reflect the existing behavior, not imagined features.
+
+2. DEFINE v3.1 MINIMAL DELTA
+
+Propose v3.1 as a minimal, non-breaking delta:
+
+Allowed changes:
+
+Structural refactor
+
+Core extraction
+
+Lifecycle hardening
+
+Daemon safety
+
+Docker clarity
+
+Explicitly list:
+
+What changes
+
+What does NOT change
+
+Why each change exists
+
+No feature expansion.
+
+3. EXTRACT ORCHESTRATOR CORE
+
+Refactor the orchestrator into a pure, testable core:
+
+Required characteristics:
+
+No direct filesystem access
+
+No direct process spawning
+
+No global state
+
+All side effects injected via adapters
+
+Required interface:
+
+init(config)
+
+health()
+
+run_pipeline(prompt)
+
+list_agents()
+
+shutdown()
+
+Define:
+
+Adapter contracts (memory, model, clock, logging)
+
+Deterministic execution guarantees
+
+How unit tests can run without Docker or Ollama
+
+4. HARDEN FOR UNATTENDED / DAEMON USE
+
+Add daemon-grade guarantees:
+
+Lockfile and PID handling
+
+Idempotent startup
+
+Safe restart behavior
+
+Signal handling (SIGTERM, SIGINT)
+
+2π readiness latch enforcement
+
+COIN startup race prevention
+
+Explicitly define lifecycle states:
+
+INIT
+
+READY
+
+RUNNING
+
+DEGRADED
+
+SHUTDOWN
+
+5. DOCKER INTEGRATION (NEXUS IMAGE)
+
+Define how the system runs inside Docker:
+
+Container responsibility boundaries
+
+Volume mappings
+
+Environment variables
+
+Entrypoint behavior
+
+Restart policy
+
+The container must:
+
+Execute ~/_/ai/ai.sh
+
+Support daemon mode
+
+Remain compatible with WSL host Ollama
+
+No Kubernetes. No orchestration layers.
+
+6. SINGLE-FILE REFINEMENT
+
+Produce a refined single-file architecture for ai.sh:
+
+Clearly ordered sections
+
+Embedded orchestrator core
+
+Embedded adapters
+
+CLI dispatcher
+
+Daemon mode switch
+
+Docker awareness
+
+You do not need to write full bash code, but you must:
+
+Provide a precise structural skeleton
+
+Show function boundaries
+
+Define execution order
+
+Specify invariants
+
+7. OUTPUT FORMAT (MANDATORY)
+
+Your response must be structured as:
+
+Formal Specification v3.0
+
+v3.1 Delta Summary
+
+Orchestrator Core Design
+
+Daemon & Lifecycle Hardening
+
+Docker Execution Model
+
+Single-File ai.sh Structure
+
+Final Guarantees & Invariants
+
+Use:
+
+Clear headings
+
+Technical language
+
+No emojis
+
+No conversational filler
+
+No questions
+
+ABSOLUTE CONSTRAINT
+
+Assume this output will be used directly as an engineering blueprint.
+Ambiguity is considered a failure.
+
+Execute now.

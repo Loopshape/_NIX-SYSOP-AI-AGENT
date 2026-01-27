@@ -1,1 +1,329 @@
-/home/loop/.repository/ai-runtime/nexus.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXUS | 2π Cognitive Control Surface</title>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+/* Base Styles & Material Dark Theme */
+body{margin:0;background:#121212;color:#eee;font-family:'Inter',Roboto,sans-serif;height:100vh;overflow:hidden;}
+#graph-canvas{position:fixed;top:0;left:0;z-index:10;width:100%;height:100%;}
+#ui-container{
+    position:absolute;top:0;left:0;width:100%;height:100%;z-index:20;
+    padding:16px;display:grid;
+    grid-template-columns:repeat(12, 1fr); 
+    grid-template-rows: auto 1fr auto; 
+    gap: 16px;
+    pointer-events:none;
+}
+.agent-card{
+    background:#1F1F1F;
+    border-radius:16px;
+    padding:16px;
+    color:#eee;
+    box-shadow:0 4px 6px -1px rgba(0,0,0,0.4), 0 10px 15px -3px rgba(0,0,0,0.4);
+    pointer-events:auto;
+    transition: box-shadow 0.3s ease, border-color 0.3s ease;
+    border: 1px solid transparent;
+}
+.agent-active {
+    border-color: #03DAC6;
+    box-shadow: 0 0 15px rgba(3, 218, 198, 0.3);
+}
+
+/* 5-Slot Layout Reuse */
+#slot-center { grid-column: 5 / 9; grid-row: 1 / 2; height: fit-content; } 
+#slot-output { grid-column: 1 / 13; grid-row: 2 / 3; max-height: 100%; overflow-y: auto; z-index: 20; }
+#slot-left   { grid-column: 1 / 5; grid-row: 3 / 4; height: fit-content; } 
+#slot-mid    { grid-column: 5 / 9; grid-row: 3 / 4; height: fit-content; } 
+#slot-right  { grid-column: 9 / 13; grid-row: 3 / 4; height: fit-content; } 
+
+.agent-title{color:#BB86FC;font-weight:700;font-size:1.4em;}
+.agent-subtitle{color:#03DAC6;font-weight:300;font-size:0.8em;margin-bottom:8px;}
+.agent-content{
+    margin-top:12px;
+    font-size:0.9em;
+    color:rgba(255,255,255,0.7);
+    white-space: pre-wrap;
+}
+
+#prompt-container{
+    position:fixed;top:45%;left:50%;transform:translate(-50%,-50%);
+    display:flex;gap:12px;z-index:25;
+    width: min(90vw, 600px);
+    background: #1F1F1F;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.6);
+}
+#prompt-input{
+    flex-grow:1;
+    background:transparent;
+    border:none;
+    border-bottom:2px solid rgba(187,134,252,0.5);
+    color:#eee;
+    font-size:1em;
+    padding:8px;
+    outline:none;
+    transition: border-color 0.3s ease;
+}
+#prompt-input:focus{border-bottom-color:#BB86FC;}
+#prompt-submit{
+    width:48px;height:48px;
+    border-radius:50%;
+    background:#03DAC6;
+    color: #121212;
+    border:none;
+    cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow: 0 4px 10px rgba(3,218,198,0.4);
+}
+#prompt-submit:disabled { background: #555; cursor: not-allowed; }
+
+/* Code Block Styling */
+pre { background: #111; padding: 10px; border-radius: 6px; overflow-x: auto; border: 1px solid #333; }
+code { font-family: 'Fira Code', monospace; color: #a5d6ff; }
+</style>
+</head>
+<body>
+
+<canvas id="graph-canvas"></canvas>
+
+<div id="prompt-container">
+    <input type="text" id="prompt-input" placeholder="Ask NEXUS (e.g. 'Define the nature of time')" autofocus>
+    <button id="prompt-submit">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3l18 9-18 9V3z"/></svg>
+    </button>
+</div>
+
+<div id="ui-container">
+    <!-- Orchestrator / Primary -->
+    <div id="slot-center" class="agent-card">
+        <div class="agent-title" id="title-center">NEXUS</div>
+        <div class="agent-subtitle" id="sub-center">Orchestrator</div>
+        <div class="agent-content" id="content-center">System Idle.</div>
+    </div>
+
+    <!-- Main Output / Work -->
+    <div id="slot-output" class="agent-card">
+        <div class="agent-title" id="title-output">RESPONSE</div>
+        <div class="agent-subtitle" id="sub-output">Synthesis</div>
+        <div class="agent-content" id="content-output">Awaiting input...</div>
+    </div>
+
+    <!-- Reasoning / Support Agents -->
+    <div id="slot-left" class="agent-card">
+        <div class="agent-title" id="title-left">CORE</div>
+        <div class="agent-subtitle" id="sub-left">Epistemic</div>
+        <div class="agent-content" id="content-left">Standby</div>
+    </div>
+
+    <div id="slot-mid" class="agent-card">
+        <div class="agent-title" id="title-mid">WAVE</div>
+        <div class="agent-subtitle" id="sub-mid">Generative</div>
+        <div class="agent-content" id="content-mid">Standby</div>
+    </div>
+
+    <div id="slot-right" class="agent-card">
+        <div class="agent-title" id="title-right">COIN</div>
+        <div class="agent-subtitle" id="sub-right">Validator</div>
+        <div class="agent-content" id="content-right">Standby</div>
+    </div>
+</div>
+
+<script type="module">
+/**
+ * NEXUS FRONTEND LOGIC
+ * - Canvas Topology Rendering
+ * - Bridge Communication
+ * - UI Management
+ */
+
+const ENDPOINT = '/api/ask'; // Proxied by Apache
+const CANVAS = document.getElementById('graph-canvas');
+const CTX = CANVAS.getContext('2d');
+
+// --- GRAPH STATE ---
+let nodes = [];
+let edges = [];
+let width, height;
+
+// --- UTILS ---
+function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    CANVAS.width = width;
+    CANVAS.height = height;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function clearGraph() {
+    nodes = [];
+    edges = [];
+}
+
+function addNode(id, type, label) {
+    const existing = nodes.find(n => n.id === id);
+    if (existing) return existing;
+
+    const node = {
+        id, type, label,
+        x: width / 2 + (Math.random() - 0.5) * 200,
+        y: height / 2 + (Math.random() - 0.5) * 200,
+        vx: 0, vy: 0
+    };
+    
+    // Type specific initial positions
+    if (type === 'HASH') { node.y = height * 0.3; node.color = '#BB86FC'; }
+    if (type === 'REHASH') { node.y = height * 0.7; node.color = '#03DAC6'; }
+    if (type === 'AGENT') { node.color = '#CF6679'; }
+
+    nodes.push(node);
+    return node;
+}
+
+function addEdge(sourceId, targetId) {
+    edges.push({ source: sourceId, target: targetId });
+}
+
+// --- RENDER LOOP ---
+function render() {
+    CTX.clearRect(0, 0, width, height);
+    
+    // Draw connections
+    CTX.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    CTX.lineWidth = 1;
+    edges.forEach(e => {
+        const s = nodes.find(n => n.id === e.source);
+        const t = nodes.find(n => n.id === e.target);
+        if (s && t) {
+            CTX.beginPath();
+            CTX.moveTo(s.x, s.y);
+            CTX.lineTo(t.x, t.y);
+            CTX.stroke();
+        }
+    });
+
+    // Draw nodes
+    nodes.forEach(n => {
+        // Physics update (simple drift)
+        n.x += n.vx;
+        n.y += n.vy;
+        
+        CTX.fillStyle = n.color || '#fff';
+        CTX.beginPath();
+        CTX.arc(n.x, n.y, type === 'HASH' ? 8 : 5, 0, Math.PI * 2);
+        CTX.fill();
+
+        // Label
+        CTX.fillStyle = 'rgba(255,255,255,0.5)';
+        CTX.font = '10px monospace';
+        CTX.fillText(n.label || n.id, n.x + 10, n.y + 3);
+    });
+
+    requestAnimationFrame(render);
+}
+render();
+
+// --- BRIDGE API ---
+async function nexusAsk(prompt, options = {}) {
+    try {
+        const res = await fetch(ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, ...options })
+        });
+        
+        if (!res.ok) throw new Error(`Bridge Error: ${res.status}`);
+        return await res.json();
+    } catch (e) {
+        return { nexus: 'ERROR', response: e.message };
+    }
+}
+
+// --- UI CONTROLLER ---
+const ui = {
+    center: { el: document.getElementById('slot-center'), title: document.getElementById('title-center'), content: document.getElementById('content-center') },
+    output: { el: document.getElementById('slot-output'), title: document.getElementById('title-output'), content: document.getElementById('content-output') },
+    left:   { el: document.getElementById('slot-left'), title: document.getElementById('title-left'), content: document.getElementById('content-left') },
+    mid:    { el: document.getElementById('slot-mid'), title: document.getElementById('title-mid'), content: document.getElementById('content-mid') },
+    right:  { el: document.getElementById('slot-right'), title: document.getElementById('title-right'), content: document.getElementById('content-right') },
+};
+
+function updateAgentSlot(slot, name, role, status) {
+    if (ui[slot]) {
+        ui[slot].title.innerText = name;
+        ui[slot].content.innerText = status;
+        if (role) document.getElementById(`sub-${slot}`).innerText = role;
+    }
+}
+
+// --- MAIN LOGIC ---
+const input = document.getElementById('prompt-input');
+const submit = document.getElementById('prompt-submit');
+
+async function handleRequest() {
+    const prompt = input.value.trim();
+    if (!prompt) return;
+
+    // Reset UI
+    clearGraph();
+    submit.disabled = true;
+    ui.center.content.innerText = "Thinking...";
+    ui.output.content.innerText = "Processing...";
+    
+    // Create Root Hash Node
+    const hashId = `H-${Date.now().toString().slice(-4)}`;
+    addNode(hashId, 'HASH', hashId);
+
+    try {
+        const data = await nexusAsk(prompt, { hash: hashId });
+        
+        if (data.nexus === 'OK') {
+            // Update Graph
+            if (data.rehash) {
+                const rehashId = `R-${data.rehash.slice(-4)}`;
+                addNode(rehashId, 'REHASH', rehashId);
+                addEdge(hashId, rehashId);
+            }
+            
+            // Visualize Agents
+            const agents = data.agent.split(',');
+            agents.forEach((a, i) => {
+                const nodeId = `A-${a}`;
+                addNode(nodeId, 'AGENT', a);
+                addEdge(data.rehash ? `R-${data.rehash.slice(-4)}` : hashId, nodeId);
+            });
+
+            // Update UI Output
+            ui.output.content.innerText = data.response;
+            ui.center.content.innerText = "Converged";
+            
+            // Update Slots based on participation
+            updateAgentSlot('center', 'NEXUS', 'Orchestrator', `Active: ${data.agent}`);
+            
+            // Simple mapping for visual flare
+            if (agents.includes('CORE')) updateAgentSlot('left', 'CORE', 'Logic', 'Active');
+            if (agents.includes('WAVE')) updateAgentSlot('mid', 'WAVE', 'Creative', 'Active');
+            if (agents.includes('COIN')) updateAgentSlot('right', 'COIN', 'Validator', 'Active');
+
+        } else {
+            ui.output.content.innerText = `Error: ${data.message || data.error}`;
+        }
+    } catch (e) {
+        ui.output.content.innerText = `Critical Failure: ${e.message}`;
+    }
+
+    submit.disabled = false;
+    input.value = '';
+}
+
+submit.addEventListener('click', handleRequest);
+input.addEventListener('keypress', e => { if (e.key === 'Enter') handleRequest(); });
+
+</script>
+</body>
+</html>

@@ -1,1 +1,1 @@
-/home/loop/.repository/ai-runtime/env_cleanerfix.sh
+sed -i '/^[[:space:]]*m[[:space:]]*$/d' ~/.local_ai/.env.local

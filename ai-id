@@ -1,1 +1,6 @@
-/home/loop/.repository/ai-runtime/ai-id
+#!/bin/bash
+
+# Example using Basic auth (admin:adminPassword)
+curl -s -u admin:adminPassword \
+     http://NEXUS_HOST:NEXUS_PORT/service/rest/v1/status/check \
+     | jq .

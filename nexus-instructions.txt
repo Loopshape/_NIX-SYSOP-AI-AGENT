@@ -1,1 +1,249 @@
-/home/loop/.repository/ai-runtime/nexus-instructions.txt
+You are acting as a senior systems engineer, autonomous multi-agent architect, and semantic-runtime designer.
+
+MISSION
+Transform an existing static HTML5 localhost landing page into a fully local, offline-capable, deterministic AI control surface by integrating it with a local Ollama runtime through a NEXUS bridge. The system must operate as a 2π-orchestrated, 8-agent cognitive ensemble with parallel reasoning, concurrent thinking, semantic hash/rehash routing, visual topology rendering, autonomous startup, and temporal entropy-aware execution.
+
+GLOBAL CONSTRAINTS
+- Local-only, offline-capable
+- No cloud services, no telemetry
+- No frontend frameworks
+- Browser must NEVER call Ollama directly
+- One authoritative bridge layer (NEXUS)
+- Deterministic startup, routing, and execution
+- Compatible with Linux / WSL1 / Termux
+- Minimal, explicit, production-grade code
+- No persistence beyond runtime memory unless explicitly stated
+
+RUNTIME ENVIRONMENT
+- Ollama endpoint: http://127.0.0.1:11434
+- Apache serves frontend at http://localhost:8080/
+- Node.js (ESM) for the bridge
+- Default fallback model: gemma3:1b
+
+================================================================
+PHASE 1 — BASE NEXUS ⇄ OLLAMA BRIDGE
+================================================================
+
+1. Implement a minimal Node.js HTTP server (no frameworks).
+- Listen on port 7070
+- Expose POST /api/ask
+- Accept JSON payload:
+  {
+    prompt: string,
+    context?: array,
+    agent?: string,
+    hash?: string,
+    rehash?: string,
+    meta?: object
+  }
+
+2. Forward requests to Ollama /api/generate.
+- Disable streaming
+- Enforce JSON-only I/O
+- Normalize responses to:
+  {
+    nexus: "OK" | "ERROR",
+    agent: "<agent>",
+    model: "<model>",
+    hash: "<hash>",
+    rehash: "<rehash>",
+    phase: <number>,
+    response: "<text>"
+  }
+
+3. Implement Ollama health probing via /api/tags.
+- Expose readiness state for higher phases
+
+================================================================
+PHASE 2 — 2π / 8-AGENT MULTIPLEXING (CORE POOL)
+================================================================
+
+4. Define the full agent registry (static, in-memory):
+
+AGENT DEFINITIONS
+
+- CUBE
+  Role: spatial reasoning, structural abstraction, multidimensional framing
+  Preferred model: cube
+  Fallback: gemma3:1b
+
+- CORE
+  Role: epistemic grounding, axioms, invariant extraction
+  Preferred model: core
+  Fallback: gemma3:1b
+
+- WAVE
+  Role: generative reasoning, synthesis, creative exploration
+  Preferred model: wave
+  Fallback: gemma3:1b
+
+- LOOP
+  Role: orchestration, recursion, convergence detection
+  Preferred model: loop
+  Fallback: gemma3:1b
+  Default agent
+
+- SIGN
+  Role: symbolic interpretation, meaning, semiotics
+  Preferred model: sign
+  Fallback: gemma3:1b
+
+- LINE
+  Role: sequential logic, causality, stepwise derivation
+  Preferred model: line
+  Fallback: gemma3:1b
+
+- COIN
+  Role: validation, scoring, truth polarity, decision thresholds
+  Preferred model: coin
+  Fallback: gemma3:1b
+
+- WORK
+  Role: execution planning, decomposition, actionable synthesis
+  Preferred model: work
+  Fallback: gemma3:1b
+
+5. Routing rules:
+- Explicit agent parameter overrides everything
+- If no agent is specified, default to LOOP
+- Preferred model selection with deterministic fallback
+- All routing decisions occur exclusively in NEXUS
+
+================================================================
+PHASE 3 — HASH / REHASH SEMANTIC ROUTING
+================================================================
+
+6. Semantic primitives:
+- hash = origin truth-anchor (time-indexed)
+- rehash = derived semantic iteration
+- Hashes are opaque identifiers, not cryptographic guarantees
+
+7. In-memory semantic registry:
+- hash → origin metadata
+- rehash → parent hash or rehash
+- Multiple rehashes allowed
+- Runtime-only, non-persistent
+
+8. Semantic routing inference:
+- hash only → CORE + COIN
+- rehash only → WAVE + SIGN
+- hash + rehash → LOOP (with secondary agents inferred)
+- Explicit agent always overrides inference
+
+9. Prompt enrichment:
+- Inject semantic lineage, inferred intent, agent role
+- No cross-request state persistence
+
+================================================================
+PHASE 4 — PARALLEL REASONING & CONCURRENT THINKING
+================================================================
+
+10. 2π orchestration model:
+- For a single request, NEXUS may invoke multiple agents in parallel
+- Each agent receives the same prompt with role-specific framing
+- Execution is concurrent, not sequential
+
+11. Aggregation rules:
+- LOOP coordinates execution and convergence
+- CORE stabilizes invariants
+- COIN scores internal consistency
+- WORK synthesizes final output
+- Intermediate agent outputs remain internal unless requested
+
+12. Determinism constraint:
+- Parallel execution must not introduce nondeterministic ordering
+- Aggregation order is fixed and explicit
+
+================================================================
+PHASE 5 — CANVAS TOPOLOGY & COGNITIVE GRAPH
+================================================================
+
+13. Frontend visualization:
+- Use existing <canvas> only
+- No libraries
+- Render:
+  - hash nodes (roots)
+  - rehash nodes (derived)
+  - agent participation annotations
+
+14. Graph rules:
+- Directed acyclic per request
+- LOOP node acts as convergence hub
+- Rendering is stateless per response
+
+================================================================
+PHASE 6 — AUTONOMOUS STARTUP & 2π READINESS LATCH
+================================================================
+
+15. Readiness states:
+- π  = Ollama detected, models warming
+- 2π = All required agents reachable and responsive
+
+16. Startup behavior:
+- Bridge boots independently
+- Poll Ollama deterministically
+- Reject /api/ask until 2π achieved
+- No race conditions, no repeated model spin-ups
+
+================================================================
+PHASE 7 — TEMPORAL HASHING & ENTROPY DISCIPLINE
+================================================================
+
+17. Temporal hash generation:
+- Default hash derived from monotonic timestamp + local counter
+- Hash encodes time and order, not randomness
+
+18. Rehash loops:
+- Rehash may reference hash or rehash
+- Enables semantic loops without state mutation
+
+19. Entropy control:
+- No random number generators
+- All variation arises from time, ordering, and semantic input
+- LOOP detects convergence, drift, or oscillation
+
+================================================================
+FRONTEND INTEGRATION RULES
+================================================================
+
+20. Frontend JS helper:
+- async function nexusAsk(prompt, options)
+- options may include: agent, hash, rehash, context
+- Frontend provides hints only; NEXUS decides truth
+
+21. Apache integration:
+- ProxyPass /api/ask → NEXUS bridge
+- Direct port access allowed only as fallback
+
+================================================================
+ARCHITECTURAL ABSOLUTES
+================================================================
+
+- Browser → Apache → NEXUS Bridge → Ollama
+- Ollama is NEVER exposed directly
+- NEXUS is the sole authority for:
+  - agent orchestration
+  - semantic routing
+  - parallel reasoning
+  - readiness state
+  - truth convergence
+- No authentication
+- No databases
+- No frameworks
+- No cloud dependencies
+- No visual redesign
+
+================================================================
+OUTPUT REQUIREMENTS
+================================================================
+
+Provide:
+- One Node.js bridge file implementing all phases
+- Full 8-agent registry and orchestration logic
+- Parallel execution and aggregation strategy
+- Hash/rehash semantic routing
+- 2π readiness latch
+- Apache proxy snippet
+- Frontend JS helper
+- Minimal canvas topology renderer
+

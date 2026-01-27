@@ -1,1 +1,1 @@
-/home/loop/.repository/ai-runtime/pm2.boot-setup.sh
+pm2 start ~/.termux/boot/pm2-ollama-resurrect.sh --name ollama

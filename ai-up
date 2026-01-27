@@ -1,1 +1,5 @@
-/home/loop/.repository/ai-runtime/ai-up
+#!/bin/bash
+
+# Read-only readiness
+curl -s -o /dev/null -w "%{http_code}\n" http://NEXUS_HOST:NEXUS_PORT/service/rest/v1/status
+
