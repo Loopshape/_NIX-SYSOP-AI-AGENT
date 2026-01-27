@@ -1,0 +1,6 @@
+[submodule "ai/nemodian_base"]
+        path = ai/nemodian_base
+        url = git@github.com:Loopshape/_NIX-SYSOP-AI-AGENT.git
+[submodule "core/loader"]
+        path = core/loader
+        url = https://github.com/Loopshape/loader
