@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  NEXUS-AI – Autonomous Cognitive Operating System (v4.0)
-#  Singlefile CLI + Daemon + REST + File Agent
+#  NEXUS-AI – Autonomous Cognitive Operating System (v5.0)
+#  Singlefile CLI + Daemon + REST + Multi-Agent Consensus
 # =============================================================================
 
 set -euo pipefail
@@ -12,32 +12,22 @@ DB_FILE="${BASE_DIR}/.db/ai_memory.db"
 FIFO="${BASE_DIR}/nexus.pipe"
 API_PORT=7331
 
+# Desktop Agent Pool (2π/8)
+AGENTS=("core" "sign" "loop" "code" "line" "work" "coin" "cube")
+
 mkdir -p "$BASE_DIR/.db"
 touch "$DB_FILE"
 
 # ------------------------------------------------------------------
 # Core logging
 # ------------------------------------------------------------------
-log() { echo "[NEXUS] $(date '+%H:%M:%S') $*" >&2; }
+log() { echo "[NEXUS] $(date '+%H:%M:%S') "$*"" >&2; }
 
 # ------------------------------------------------------------------
-# Ollama call (slim-compatible)
+# Memory API (Self-healing)
 # ------------------------------------------------------------------
-ollama_call() {
-  local prompt="$1"
-  curl -s http://localhost:11434/api/generate \
-    -H "Content-Type: application/json" \
-    -d "{\"model\":\"llama3\",\"prompt\":$(jq -Rs . <<<"$prompt")}" \
-  | jq -r '.response'
-}
-
-# ------------------------------------------------------------------
-# Memory API
-# ------------------------------------------------------------------
-sql() { sqlite3 "$DB_FILE" "$1"; }
-
 init_db() {
-sql <<'SQL'
+  sqlite3 "$DB_FILE" <<'SQL'
 CREATE TABLE IF NOT EXISTS memory (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  role TEXT,
@@ -47,34 +37,88 @@ CREATE TABLE IF NOT EXISTS memory (
 SQL
 }
 
+sql() {
+  init_db
+  sqlite3 "$DB_FILE" "${1:-}"
+}
+
 remember() {
-  sql "INSERT INTO memory (role,content) VALUES ('user',$(jq -Rs . <<<"$1"));"
-  sql "INSERT INTO memory (role,content) VALUES ('ai',$(jq -Rs . <<<"$2"));"
+  local role="${1:-user}"
+  local content="${2:-}"
+  sql "INSERT INTO memory (role,content) VALUES ($(jq -Rs . <<<"$role"),$(jq -Rs . <<<"$content"));"
 }
 
 recall() {
-  sql "SELECT content FROM memory ORDER BY id DESC LIMIT 10;"
+  local limit="${1:-10}"
+  sql "SELECT json_object('id', id, 'role', role, 'content', content, 'ts', ts) FROM memory ORDER BY id DESC LIMIT $limit;"
+}
+
+# ------------------------------------------------------------------
+# Ollama call (slim-compatible)
+# ------------------------------------------------------------------
+ollama_call() {
+  local prompt="${1:-}"
+  local model="${2:-llama3}"
+  
+  log "Calling $model..."
+  local response
+  response=$(curl -s http://localhost:11434/api/generate \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"$model\",\"prompt\":$(jq -Rs . <<<"$prompt"),\"stream\":false}" \
+    | jq -r '.response')
+  
+  echo "$response"
+}
+
+# ------------------------------------------------------------------
+# Consensus Engine (8 Agents)
+# ------------------------------------------------------------------
+consensus() {
+  local user_prompt="${1:-}"
+  local context
+  context=$(recall 5)
+  
+  log "Starting consensus for: $user_prompt"
+  
+  local final_response=""
+  local agent_results=""
+  
+  # Sequential execution to simulate the "rotational" consensus
+  for agent in "${AGENTS[@]}"; do
+      local agent_prompt="[AGENT:$agent] [CONTEXT:$context] [PROMPT:$user_prompt]"
+      local result
+      result=$(ollama_call "$agent_prompt" "$agent")
+      agent_results+="\n[$agent]: $result"
+      
+      # CORE/CODE/LOOP have higher influence on the final state
+      if [[ "$agent" == "core" || "$agent" == "code" ]]; then
+          final_response="$result"
+      fi
+  done
+  
+  remember "user" "$user_prompt"
+  remember "ai" "$final_response"
+  
+  echo -e "--- CONSENSUS REACHED ---\n$final_response\n\n--- AGENT DETAILS ---$agent_results"
 }
 
 # ------------------------------------------------------------------
 # Natural Prompt → File System Agent
 # ------------------------------------------------------------------
 file_agent() {
-  local instruction="$1"
+  local instruction="${1:-}"
 
   local plan
   plan=$(ollama_call "
-You are a Linux automation agent.
-Translate the following into bash commands.
-Only output executable bash:
+# You are a Linux automation agent.
+# Translate the following into bash commands.
+# Only output executable bash:
 
 $instruction
-")
+" "code")
 
-  log "Executing:"
-  echo "$plan"
-
-  bash -c "$plan"
+  log "Executing File Agent Plan..."
+  echo "$plan" | bash
 }
 
 # ------------------------------------------------------------------
@@ -83,20 +127,50 @@ $instruction
 api_server() {
   log "API server on http://localhost:$API_PORT"
   while true; do
-    { 
-      read line
-      if [[ "$line" =~ GET\ /memory ]]; then
-        body=$(recall | jq -R . | jq -s .)
-      else
-        body='{"status":"ok"}'
+    # This is a more advanced NC server loop that can read the request
+    # We use a temp file to capture the request
+    local tmp_req
+    tmp_req=$(mktemp)
+    
+    {
+      # Read request into temp file (stop after headers or a short timeout)
+      # This is tricky in pure bash, so we'll use a simplified version:
+      # We'll just read the first line and then everything else we can.
+      if ! read -r first_line; then
+          rm -f "$tmp_req"
+          return
       fi
-      printf "HTTP/1.1 200 OK\r\n"
-      printf "Content-Type: application/json\r\n\r\n"
+      echo "$first_line" > "$tmp_req"
+      
+      local body='{"status":"ok"}'
+      local response_code="200 OK"
+      
+      if [[ "$first_line" =~ GET\ /memory ]]; then
+        body=$(recall 20 | jq -s .)
+      elif [[ "$first_line" =~ POST\ /remember ]]; then
+        # In a real NC server, parsing POST body is hard. 
+        # We'll assume the next lines or just log it.
+        remember "remote" "Mobile announcement received"
+        body='{"status":"remembered"}'
+      elif [[ "$first_line" =~ POST\ /prompt ]]; then
+        # Trigger consensus from remote
+        echo "Remote prompt received" > "$FIFO" &
+        body='{"status":"accepted"}'
+      else
+        body='{"error":"not_found"}'
+        response_code="404 Not Found"
+      fi
+      
+      printf "HTTP/1.1 %s\r\n" "$response_code"
+      printf "Content-Type: application/json\r\n"
+      printf "Content-Length: %d\r\n" "${#body}"
+      printf "Connection: close\r\n\r\n"
       echo "$body"
-    } | nc -l -p "$API_PORT" -q 1
+      
+      rm -f "$tmp_req"
+    } | nc -l -p "$API_PORT" -q 1 || log "NC restart"
   done
 }
-
 # ------------------------------------------------------------------
 # Daemon loop
 # ------------------------------------------------------------------
@@ -104,29 +178,23 @@ daemon() {
   init_db
   [[ -p "$FIFO" ]] || mkfifo "$FIFO"
 
-  log "NEXUS daemon online"
+  log "NEXUS daemon online (8 agents active)"
   api_server &
 
   while true; do
-    read -r input < "$FIFO"
-    [[ -z "$input" ]] && continue
+    if read -r input < "$FIFO"; then
+        [[ -z "$input" ]] && continue
 
-    context=$(recall)
-    response=$(ollama_call "
-Context:
-$context
+        log "Processing FIFO input: $input"
+        local response
+        response=$(consensus "$input")
 
-User:
-$input
-")
-
-    remember "$input" "$response"
-
-    if [[ "$input" =~ ^(create|generate|build|write|delete|refactor) ]]; then
-      file_agent "$input"
+        if [[ "$input" =~ ^(create|generate|build|write|delete|refactor) ]]; then
+          file_agent "$input"
+        fi
+        
+        log "Response: $response"
     fi
-
-    echo "$response"
   done
 }
 
@@ -134,15 +202,17 @@ $input
 # CLI entry
 # ------------------------------------------------------------------
 case "${1:-}" in
-  daemon) daemon ;;
-  api) api_server ;;
-  remember) shift; remember "$*" "OK" ;;
-  recall) recall ;;
-  *)
-    init_db
-    resp=$(ollama_call "$*")
-    remember "$*" "$resp"
-    echo "$resp"
-  ;;
+  daemon) daemon ;; 
+  api) api_server ;; 
+  remember) shift; remember "user" "$*" ;; 
+  recall) shift; recall "${1:-10}" ;; 
+  consensus) shift; consensus "$*" ;; 
+  *) 
+    if [[ -n "${1:-}" ]]; then
+        consensus "$*"
+    else
+        echo "NEXUS-AI v5.0"
+        echo "Usage: $0 [daemon|api|remember|recall|consensus|prompt]"
+    fi
+  ;; 
 esac
-
