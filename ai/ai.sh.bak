@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  WSL Runtime AI Orchestration System – v3.2 (Batch Operators)
+#  WSL Runtime AI Orchestration System – v3.3 (Active Gen)
 # =============================================================================
 #  Features:
 #   • 8-Agent "Shifted Entropy" Model: Cube, Core, Loop, Wave, Sign, Line, Coin, Work
-#   • Advanced Batch Operators (* . + - :) 
-#   • Unrestricted Batch File Processing (JSON/Text)
+#   • Advanced Batch Operators (* . + - : > @)
+#   • Active File Generation & Editing
 #   • Universal Input Parsing: Prompt / File / URL / Hash
 #   • Dynamic Temperature & Token Budget per Phase
 #   • Embedding‑based Memory Recall (Semantic Context)
@@ -21,7 +21,7 @@ IFS=$'\n\t'
 # -------------------------------------------------------------------------
 
 # Base directories
-readonly BASE_DIR="${HOME}/.repository/wsl-runtime"
+readonly BASE_DIR="${HOME}/_/ai/.db"
 readonly AI_DIR="${HOME}/_/ai"
 readonly DB_FILE="${BASE_DIR}/ai_memory.db"
 readonly LOG_FILE="${BASE_DIR}/ai_system.log"
@@ -62,7 +62,7 @@ declare -A AGENTS=(
 )
 
 # -------------------------------------------------------------------------
-#   1️⃣  Logging (with rotation)
+#   1️⃣  Logging (with rotation) - Redirected to STDERR
 # -------------------------------------------------------------------------
 log_message() {
     local level="$1" message="$2"
@@ -70,11 +70,11 @@ log_message() {
     ts=$(date '+%Y-%m-%d %H:%M:%S')
 
     case "$level" in
-        INFO)  printf "${GREEN}[INFO]${NC} %s\n" "$message" ;;
-        WARN)  printf "${YELLOW}[WARN]${NC} %s\n" "$message" ;;
-        ERROR) printf "${RED}[ERROR]${NC} %s\n" "$message" ;;
-        DEBUG) printf "${BLUE}[DEBUG]${NC} %s\n" "$message" ;;
-        *)     printf "[%s] %s\n" "$level" "$message" ;;
+        INFO)  printf "${GREEN}[INFO]${NC} %s\n" "$message" >&2 ;;
+        WARN)  printf "${YELLOW}[WARN]${NC} %s\n" "$message" >&2 ;;
+        ERROR) printf "${RED}[ERROR]${NC} %s\n" "$message" >&2 ;;
+        DEBUG) printf "${BLUE}[DEBUG]${NC} %s\n" "$message" >&2 ;;
+        *)     printf "[%s] %s\n" "$level" "$message" >&2 ;;
     esac
 
     # Rotate if needed
@@ -107,7 +107,7 @@ sql_exec() {
 
     local waited=0
     while ! _sql_lock; do
-        (( waited++ )) && (( waited > 50 )) && { 
+        (( waited++ )) && (( waited > 50 )) && {
             log_message "ERROR" "Failed to acquire DB lock after 5s"
             return 1
         }
@@ -126,11 +126,10 @@ sql_exec() {
 init_database() {
     mkdir -p "$(dirname "$DB_FILE")"
     
-    sql_exec <<'SQL'
+    sql_exec <<'SQL' >/dev/null
 PRAGMA journal_mode=WAL;
 BEGIN TRANSACTION;
-CREATE TABLE IF NOT EXISTS agent_memories (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS agent_memories (    id            INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id      INTEGER NOT NULL,
     agent_name    TEXT    NOT NULL,
     prompt        TEXT    NOT NULL,
@@ -158,7 +157,7 @@ INSERT OR IGNORE INTO system_state (key,value) VALUES
     ('cycle_phase','0'),
     ('total_tokens','0'),
     ('active_agents','0'),
-    ('system_version','3.2.0');
+    ('system_version','3.3.0');
 COMMIT;
 SQL
 }
@@ -175,7 +174,7 @@ _ollama_post() {
     local attempt=0 delay=1
     while (( attempt < 3 )); do
         local resp
-        resp=$(curl -s -X POST "${OLLAMA_HOST}${endpoint}" -H "Content-Type: application/json" -d "$payload" --max-time 30) && { 
+        resp=$(curl -s -X POST "${OLLAMA_HOST}${endpoint}" -H "Content-Type: application/json" -d "$payload" --max-time 120) && {
             echo "$resp"
             return 0
         } || {
@@ -192,7 +191,7 @@ _ollama_post() {
 embed_text() {
     local txt="$1"
     local payload
-    payload=$(jq -nc --arg txt "$txt" --arg model "$EMBED_MODEL" \
+    payload=$(jq -nc --arg txt "$txt" --arg model "$EMBED_MODEL"  \
             '{model:$model, input:$txt}')
     _ollama_post "/api/embeddings" "$payload" | jq -r '.embedding // empty'
 }
@@ -233,13 +232,13 @@ resolve_input() {
     fi
 
     if [[ "$input" =~ ^[a-fA-F0-9]{64}$ ]]; then
-        log_message "INFO" "Input detected as Hash: $input"
         local memory
         memory=$(sql_exec "SELECT response FROM agent_memories WHERE prompt LIKE '%$input%' LIMIT 1;")
         if [[ -n "$memory" ]]; then
-            echo "Recalling memory for hash $input: $memory"
+            log_message "INFO" "Recalling memory for hash $input"
+            echo "$memory"
         else
-            echo "Hash $input found, but no direct memory link. Analyzing as ID."
+            log_message "INFO" "Hash $input found, but no direct memory link. Analyzing as ID."
         fi
         return
     fi
@@ -305,7 +304,7 @@ execute_agent() {
     else
         ollama_prompt="Task:\n${prompt}"
     fi
-    
+
     case "$agent_name" in
         "Cube") ollama_prompt="[Role: Structural Analyzer] Analyze the dimensions and structure of: $ollama_prompt" ;;
         "Core") ollama_prompt="[Role: Central Logic] Identify the core truth and logic of: $ollama_prompt" ;;
@@ -318,11 +317,11 @@ execute_agent() {
     esac
 
     local payload
-    payload=$(jq -nc \
-        --arg model "$OLLAMA_MODEL" \
-        --arg prompt "$ollama_prompt" \
-        --argjson temperature "$temperature" \
-        --argjson num_predict 256 \
+    payload=$(jq -nc  \
+        --arg model "$OLLAMA_MODEL"  \
+        --arg prompt "$ollama_prompt"  \
+        --argjson temperature "$temperature"  \
+        --argjson num_predict 256  \
         '{model:$model, prompt:$prompt, stream:false,
           options:{temperature:$temperature, num_predict:$num_predict}}')
 
@@ -346,13 +345,13 @@ execute_agent() {
         ($agent_id, '$agent_name', '$(escape_sql "$prompt")',
                '$(escape_sql "$response")', $tokens_used, $confidence, $position);"
 
-    jq -nc 
-        --argjson agent_id "$agent_id"
-        --arg agent_name "$agent_name"
-        --arg response "$response"
-        --argjson position "$position"
-        --argjson confidence "$confidence"
-        --argjson tokens_used "$tokens_used"
+    jq -nc  \
+        --argjson agent_id "$agent_id"  \
+        --arg agent_name "$agent_name"  \
+        --arg response "$response"  \
+        --argjson position "$position"  \
+        --argjson confidence "$confidence"  \
+        --argjson tokens_used "$tokens_used"  \
         '{agent_id:$agent_id, agent_name:$agent_name, response:$response,
           position:$position, confidence:$confidence, tokens_used:$tokens_used}'
 }
@@ -360,23 +359,49 @@ execute_agent() {
 escape_sql() { sed "s/'/''/g" <<<"$1"; }
 
 # -------------------------------------------------------------------------
+#   8️⃣ Code Extraction Helper
+# -------------------------------------------------------------------------
+extract_code_block() {
+    local text="$1"
+    # Extract content between ``` and ```.
+    # If multiple blocks, this simple awk grabs everything between the first open and next close.
+    # Actually, let's grab all content inside blocks to be safe, or just the first.
+    # The heuristic: typically the code is the largest block or the only block.
+    
+    local code
+    code=$(echo "$text" | awk '
+      /^```/ { in_block = !in_block; next }
+      in_block { print }
+    ')
+    
+    if [[ -z "$code" || "$code" =~ ^[[:space:]]*$ ]]; then
+        # Fallback: if no code blocks, assumes the whole response might be code if requested via > or @
+        # But this is dangerous. Let's return empty and warn.
+        echo ""
+    else
+        echo "$code"
+    fi
+}
+
+# -------------------------------------------------------------------------
 #   Core Reasoning Logic (Single Task)
 # -------------------------------------------------------------------------
 process_single_task() {
     local raw_input="$1"
+    # Optional 2nd arg to control output mode if needed, but we rely on stdout=JSON
     
     local prompt
     prompt=$(resolve_input "$raw_input")
-    
+
     if [[ -z "$prompt" ]]; then
-        log_message "ERROR" "Input resolved to empty string. Skipping."
+        log_message "ERROR" "Input resolved to empty string. Skipping." >&2
         return
     fi
 
     local temp_dir
     temp_dir=$(mktemp -d)
 
-    log_message "INFO" "Starting [Cube-Core-Loop-Wave-Sign-Line-Coin-Work] cycle for: ${prompt:0:40}..."
+    log_message "INFO" "Starting Cycle for: ${prompt:0:40}..."
     sql_exec "UPDATE system_state SET value='${#AGENTS[@]}' WHERE key='active_agents';"
 
     local pids=()
@@ -405,9 +430,9 @@ process_single_task() {
     local joint_context
     joint_context=$(printf "%s\n" "${workers_json[@]}" | jq -r '"[" + .agent_name + "]: " + .response' | paste -sd'\n' -)
     local coordinator_prompt="[Role: Coordinator] Summarize the 8-agent analysis into a coherent conclusion.\nTask: $prompt\nAnalysis:\n$joint_context"
-    
+
     local payload
-    payload=$(jq -nc --arg model "$OLLAMA_MODEL" --arg prompt "$coordinator_prompt" 
+    payload=$(jq -nc --arg model "$OLLAMA_MODEL" --arg prompt "$coordinator_prompt"  \
             '{model:$model, prompt:$prompt, stream:false}')
     local coord_raw
     local coord_resp="Coordinator unavailable"
@@ -423,11 +448,12 @@ process_single_task() {
 
     rm -rf "$temp_dir"
 
-    jq -nc 
-        --arg prompt "$prompt"
-        --argjson phase "$new_phase"
-        --argjson workers "$(printf "%s\n" "${workers_json[@]}" | jq -s '.')"
-        --arg coordinator "$coord_resp"
+    # OUTPUT JSON TO STDOUT
+    jq -nc  \
+        --arg prompt "$prompt"  \
+        --argjson phase "$new_phase"  \
+        --argjson workers "$(printf "%s\n" "${workers_json[@]}" | jq -s '.')"  \
+        --arg coordinator "$coord_resp"  \
         '{status:"success", prompt:$prompt, cycle_phase:$phase,
           workers:$workers, coordinator:$coordinator}'
 }
@@ -444,19 +470,21 @@ parallel_reasoning() {
         log_message "INFO" "Operator [*]: Recursive batch processing for '$rest'"
         find . -type f -not -path '*/.*' -not -path '*/node_modules/*' | while read -r file;
         do
-             echo ">>> Processing File: $file"
-             process_single_task "File: $file. Task: $rest"
+             log_message "INFO" ">>> Processing File: $file"
+             process_single_task "File: $file. Task: $rest" >/dev/null
         done
         return
+
     elif [[ "$input" == "."* ]]; then
         local rest="${input#. }"
         log_message "INFO" "Operator [.]: Flat batch processing for '$rest'"
         find . -maxdepth 1 -type f -not -path '*/.*' | while read -r file;
         do
-             echo ">>> Processing File: $file"
-             process_single_task "File: $file. Task: $rest"
+             log_message "INFO" ">>> Processing File: $file"
+             process_single_task "File: $file. Task: $rest" >/dev/null
         done
         return
+
     elif [[ "$input" == "+"* ]]; then
         # Format: +ext prompt...
         local no_plus="${input#+}"
@@ -465,10 +493,11 @@ parallel_reasoning() {
         log_message "INFO" "Operator [+]: Extension batch processing for '.$ext' with '$rest'"
         find . -type f -name "*.$ext" -not -path '*/.*' -not -path '*/node_modules/*' | while read -r file;
         do
-             echo ">>> Processing File: $file"
-             process_single_task "File: $file. Task: $rest"
+             log_message "INFO" ">>> Processing File: $file"
+             process_single_task "File: $file. Task: $rest" >/dev/null
         done
         return
+
     elif [[ "$input" == "-"* ]]; then
         local rest="${input#- }"
         # Format: - filename
@@ -477,18 +506,20 @@ parallel_reasoning() {
             log_message "INFO" "Operator [-]: Enhanced suggestion for '$target_file'"
             local content
             content=$(cat "$target_file")
-            process_single_task "Target File: $target_file\nContent:\n$content\n\nTask: Analyze this file and provide enhanced suggestions for improvements, refactoring, and error handling."
+            # We output to stdout so user can see the suggestion
+            process_single_task "Target File: $target_file\nContent:\n$content\n\nTask: Analyze this file and provide enhanced suggestions for improvements, refactoring, and error handling." | jq -r '.coordinator'
         else
             log_message "ERROR" "Operator [-]: Target file '$target_file' not found."
         fi
         return
+
     elif [[ "$input" == ":"* ]]; then
         local rest="${input#: }"
         # Format: : file1 file2 ... prompt
         local combined_content=""
         local prompt_start=0
         local accumulated_prompt=""
-        
+
         read -ra words <<< "$rest"
         for word in "${words[@]}"; do
             if [[ -f "$word" && "$prompt_start" -eq 0 ]]; then
@@ -498,14 +529,93 @@ parallel_reasoning() {
                 accumulated_prompt+="$word "
             fi
         done
-        
+
         log_message "INFO" "Operator [:]: Combined context logic refactoring."
-        process_single_task "Combined Context:\n$combined_content\n\nTask: $accumulated_prompt\nGoal: Analyze these combined files to refactor the workflow logic."
+        process_single_task "Combined Context:\n$combined_content\n\nTask: $accumulated_prompt\nGoal: Analyze these combined files to refactor the workflow logic." | jq -r '.coordinator'
+        return
+
+    elif [[ "$input" == ">"* ]]; then
+        # ---------------------------------------------------------
+        # Operator [>]: GENERATE / WRITE FILE
+        # Format: > filename instruction...
+        # ---------------------------------------------------------
+        local no_op="${input#>}"
+        # Trim leading spaces
+        no_op="${no_op#"${no_op%%[![:space:]]*}"}"
+        local target_file="${no_op%% *}"
+        local instruction="${no_op#* }"
+        
+        log_message "INFO" "Operator [>]: Generating content for '$target_file'"
+        
+        local task_prompt="Task: Generate the FULL content for the file '$target_file'.\n\nRequirement: $instruction\n\nIMPORTANT: Output ONLY the valid code/text for the file inside markdown code blocks (e.g., \`\`\`bash ... \`\`\`). Do not add conversational text or preambles."
+
+        local result_json
+        result_json=$(process_single_task "$task_prompt")
+        
+        local coordinator_text
+        coordinator_text=$(echo "$result_json" | jq -r '.coordinator')
+        
+        local extracted_code
+        extracted_code=$(extract_code_block "$coordinator_text")
+        
+        if [[ -n "$extracted_code" ]]; then
+            mkdir -p "$(dirname "$target_file")"
+            echo "$extracted_code" > "$target_file"
+            log_message "INFO" "Successfully wrote generated content to '$target_file'"
+            echo "File '$target_file' generated."
+        else
+            log_message "ERROR" "Failed to extract code block from AI response."
+            echo "AI Response (No Code Block Found):"
+            echo "$coordinator_text"
+        fi
+        return
+
+    elif [[ "$input" == "@"* ]]; then
+        # ---------------------------------------------------------
+        # Operator [@]: EDIT / UPDATE FILE
+        # Format: @ filename instruction...
+        # ---------------------------------------------------------
+        local no_op="${input#@}"
+        no_op="${no_op#"${no_op%%[![:space:]]*}"}"
+        local target_file="${no_op%% *}"
+        local instruction="${no_op#* }"
+        
+        if [[ ! -f "$target_file" ]]; then
+             log_message "ERROR" "Operator [@]: File '$target_file' does not exist. Use '>' to create it."
+             return
+        fi
+
+        log_message "INFO" "Operator [@]: Editing content for '$target_file'"
+        
+        local content
+        content=$(cat "$target_file")
+        local task_prompt="Task: Edit/Update the file '$target_file'.\n\nOriginal Content:\n$content\n\nInstructions: $instruction\n\nIMPORTANT: Return the FULL updated content of the file inside markdown code blocks (e.g., \`\`\`bash ... \`\`\`). Do not output a diff. Output the whole file."
+
+        local result_json
+        result_json=$(process_single_task "$task_prompt")
+        
+        local coordinator_text
+        coordinator_text=$(echo "$result_json" | jq -r '.coordinator')
+        
+        local extracted_code
+        extracted_code=$(extract_code_block "$coordinator_text")
+        
+        if [[ -n "$extracted_code" ]]; then
+            # Backup
+            cp "$target_file" "${target_file}.bak"
+            echo "$extracted_code" > "$target_file"
+            log_message "INFO" "Successfully updated '$target_file' (Backup: ${target_file}.bak)"
+            echo "File '$target_file' updated."
+        else
+            log_message "ERROR" "Failed to extract code block from AI response."
+            echo "AI Response (No Code Block Found):"
+            echo "$coordinator_text"
+        fi
         return
     fi
 
-    # Default fallback
-    process_single_task "$input"
+    # Default fallback: Standard Reasoning (Output to stdout)
+    process_single_task "$input" | jq -r '.coordinator'
 }
 
 
@@ -515,7 +625,7 @@ parallel_reasoning() {
 process_batch() {
     local batch_file="$1"
     if [[ ! -f "$batch_file" ]]; then
-        echo "Error: Batch file not found: $batch_file"
+        echo "Error: Batch file not found: $batch_file" >&2
         exit 1
     fi
 
@@ -526,14 +636,14 @@ process_batch() {
         # JSON Mode: expect array of objects with "prompt" key
         local count
         count=$(jq '. | length' "$batch_file")
-        echo "Found $count items in JSON batch."
-        
+        echo "Found $count items in JSON batch." >&2
+
         for ((i=0; i<count; i++)); do
             local item_prompt
             item_prompt=$(jq -r ".[${i}].prompt" "$batch_file")
-            echo "Processing item $((i+1))/$count..."
+            echo "Processing item $((i+1))/$count..." >&2
             parallel_reasoning "$item_prompt"
-            echo "---------------------------------------------------"
+            echo "---------------------------------------------------" >&2
         done
     else
         # Line-by-line Text Mode
@@ -541,9 +651,9 @@ process_batch() {
         while IFS= read -r line || [[ -n "$line" ]]; do
             ((i++))
             [[ -z "$line" ]] && continue
-            echo "Processing item $i..."
+            echo "Processing item $i..." >&2
             parallel_reasoning "$line"
-            echo "---------------------------------------------------"
+            echo "---------------------------------------------------" >&2
         done < "$batch_file"
     fi
 }
@@ -617,11 +727,11 @@ main() {
             ;;
 
         stats)  get_system_stats ;;
-        cleanup) cleanup_memories "${2:-30}" ;; 
-        export) export_database ;; 
-        
+        cleanup) cleanup_memories "${2:-30}" ;;
+        export) export_database ;;
+
         status)
-            echo "=== AI System Status (v3.2) ==="
+            echo "=== AI System Status (v3.3) ==="
             echo "Agents: ${AGENTS[*]}"
             echo "DB: $DB_FILE"
             echo "Cycle: $(sql_exec "SELECT value FROM system_state WHERE key='cycle_phase';") / 8"
@@ -638,15 +748,17 @@ main() {
 
         help|*)
             cat <<'EOF'
-WSL Runtime AI Orchestration v3.2
+WSL Runtime AI Orchestration v3.3
 ================================
 Commands:
   reason "<input>"       – Run 8-Agent cycle. Supports Operators:
                            "* <task>"      : Recursive batch (all files)
                            ". <task>"      : Flat batch (current folder)
                            "+<ext> <task>" : Extension batch (e.g. +py Check)
-                           "- <file>"      : Enhanced file analysis
-                           ": <f1> <f2> ..." : Combined logic refactoring
+                           "- <file>"      : Enhanced file analysis (Output to stdout)
+                           ": <f1> <f2> ..." : Combined logic refactoring (Output to stdout)
+                           "> <file> <task>" : GENERATE file with content from AI
+                           "@ <file> <task>" : EDIT file with instructions (Backup created)
   batch <file>           – Process a JSON or Text batch file
   recall "<query>" [N]   – Search memory
   stats                  – Show JSON stats
