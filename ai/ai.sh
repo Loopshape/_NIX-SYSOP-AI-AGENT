@@ -12,8 +12,8 @@ DB_FILE="${BASE_DIR}/.db/ai_memory.db"
 FIFO="${BASE_DIR}/nexus.pipe"
 API_PORT=7331
 
-# Desktop Agent Pool (2π/8)
-AGENTS=("core" "sign" "loop" "code" "line" "work" "coin" "cube")
+# Desktop Agent Pool (2π/Agentpool)
+AGENTS=("glm-4.7:cloud")
 
 mkdir -p "$BASE_DIR/.db"
 touch "$DB_FILE"
@@ -30,6 +30,7 @@ init_db() {
   sqlite3 "$DB_FILE" <<'SQL'
 CREATE TABLE IF NOT EXISTS memory (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user TEXT,
  role TEXT,
  content TEXT,
  ts DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -45,12 +46,15 @@ sql() {
 remember() {
   local role="${1:-user}"
   local content="${2:-}"
-  sql "INSERT INTO memory (role,content) VALUES ($(jq -Rs . <<<"$role"),$(jq -Rs . <<<"$content"));"
+  local user="${USER:-nexus_user}"
+  
+  # Simple SQL escaping: replace ' with ''
+  sql "INSERT INTO memory (user,role,content) VALUES ('${user//\'/''}','${role//\'/''}','${content//\'/''}');"
 }
 
 recall() {
   local limit="${1:-10}"
-  sql "SELECT json_object('id', id, 'role', role, 'content', content, 'ts', ts) FROM memory ORDER BY id DESC LIMIT $limit;"
+  sql "SELECT json_object('id', id, 'user', user, 'role', role, 'content', content, 'ts', ts) FROM memory ORDER BY id DESC LIMIT $limit;"
 }
 
 # ------------------------------------------------------------------
@@ -58,15 +62,15 @@ recall() {
 # ------------------------------------------------------------------
 ollama_call() {
   local prompt="${1:-}"
-  local model="${2:-llama3}"
-  
+  local model="${2:-glm-4.7:cloud}"
+
   log "Calling $model..."
   local response
   response=$(curl -s http://localhost:11434/api/generate \
     -H "Content-Type: application/json" \
     -d "{\"model\":\"$model\",\"prompt\":$(jq -Rs . <<<"$prompt"),\"stream\":false}" \
     | jq -r '.response')
-  
+
   echo "$response"
 }
 
@@ -178,7 +182,7 @@ daemon() {
   init_db
   [[ -p "$FIFO" ]] || mkfifo "$FIFO"
 
-  log "NEXUS daemon online (8 agents active)"
+  log "NEXUS daemon online (agents active)"
   api_server &
 
   while true; do

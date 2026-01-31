@@ -1,0 +1,150 @@
+--- AGENT DETAILS ---
+[glm-4.7:cloud]: Based on the file listing provided, this project appears to be a comprehensive, multi-faceted **Autonomous AI Orchestration System** named **NEXUS**. It integrates various Large Language Models (LLMs), manages persistent memory, provides a web-based user interface, and includes a robust suite of system administration and installation scripts.
+
+Below is the generated documentation for the project.
+
+---
+
+# NEXUS AI Autonomous System
+
+## 1. Overview
+NEXUS is a sophisticated AI agent framework designed for autonomy and flexibility. It bridges the gap between different AI providers (Anthropic, Ollama, Gemini) and local execution environments. The system features persistent memory, emotional state simulation, hybrid orchestration models, and a React-based web interface.
+
+**Key Features:**
+*   **Multi-Model Support:** Integrates Anthropic, Ollama, and Gemini CLI.
+*   **Hybrid Orchestration:** Supports asynchronous, persistent, and hybrid execution modes.
+*   **State Management:** Utilizes SQLite and JSON for agent memory, metadata, and emotional states.
+*   **Web Interface:** A modern React/TypeScript frontend (Vite) for monitoring and interaction.
+*   **Self-Healing & Maintenance:** Includes numerous scripts for database repair, permission fixing, and system upgrades.
+
+---
+
+## 2. Architecture
+
+The project is polyglot, utilizing **Python** for core logic and agent orchestration, **Node.js/JavaScript** for web servers and bridging, and **Shell scripting** for system-level operations and lifecycle management.
+
+### Core Components
+*   **Backend (Python):** The brain of the system. Handles agent logic, database interactions, and model APIs.
+    *   *Key Files:* `agent.py`, `nexus_async_orchestrator.py`, `ai_server.py`, `anthropic.py`.
+*   **Frontend (React/TS):** The user interface.
+    *   *Key Files:* `App.tsx`, `index.tsx`, `vite.config.ts`.
+*   **Database (SQLite/SQL):** Stores memory, logs, and system state.
+    *   *Key Files:* `core.db`, `memory.db`, `schema.sql`.
+*   **Infrastructure:** Docker and PM2 process management integration.
+
+---
+
+## 3. Directory Structure & File Breakdown
+
+### 🤖 Intelligence & Orchestration
+*   `agent.py`: The primary agent logic implementation.
+*   `nexus_hybrid_orchestrator.py` / `nexus_async_orchestrator.py`: Advanced scheduling and execution logic for AI tasks.
+*   `nexus-shell.py`: Likely a CLI interface to the NEXUS core.
+*   `intend.py`: Logic for processing user intent.
+*   `mood.py` / `emotion.sql`: Handles the simulated "emotional" state of the AI.
+*   `anthropic.py` / `gemini-cli.installer.sh`: Wrappers and installers for specific LLM providers.
+
+### 💾 Data & Memory
+*   `memory.db` / `core.db`: SQLite databases for persistent storage.
+*   `agent_memory.json`: JSON-based memory dump or interchange format.
+*   `metadata.json`: Project configuration or state metadata.
+*   `schema.sql` / `entropy.sql`: Database definitions and specialized tables.
+
+### 🌐 Web Interface & Frontend
+*   `index.html` / `nexus.html` / `nft-dex.html`: Various entry points or specific app views.
+*   `App.tsx` / `index.tsx`: React application entry points.
+*   `css/`, `components/`, `assets/`: UI styling and modular components.
+*   `server.js`: The web server hosting the frontend.
+
+### ⚙️ System Administration & Scripts
+*   **Installers:**
+    *   `installer.sh`, `bootstrap.sh`: Main entry points for setting up the environment.
+    *   `nexus-ai.full-installer.sh`: Comprehensive installation script.
+    *   `termux-minimal.setup.sh`: Specific setup for Android/Termux environments.
+*   **Launchers:**
+    *   `ai_launch.sh`, `ai_local.sh`, `main.sh`: Scripts to start the system.
+*   **Maintenance & Repair:**
+    *   `fix_crew_permissions.sh`, `fix_symlinks.sh`, `self_heal-db.sh`: Automated repair tools.
+    *   `ai_upgrade.wrapper.sh`, `auto_upgrade.wrapper.sh`: Update mechanisms.
+
+---
+
+## 4. Installation & Setup
+
+The project provides several methods for installation depending on the target environment.
+
+### Standard Installation
+Run the primary installer script:
+```bash
+./installer.sh
+```
+
+### Full System Install
+For a complete setup including all dependencies and modules:
+```bash
+./nexus-ai.full-installer.sh
+```
+
+### Environment Specifics
+*   **Termux/Android:** Use `termux-minimal.setup.sh`.
+*   **Docker:** A `Dockerfile` is provided for containerized deployments.
+
+### Initialization
+Initialize the database and core configurations:
+```bash
+./ai_db-init.sh
+./db_init.sql
+```
+
+---
+
+## 5. Usage
+
+### Starting the Agent
+To launch the AI system locally:
+```bash
+./ai_launch.sh
+# or
+./run-ai.sh
+```
+
+### Web Interface
+Start the web server to access the UI:
+```bash
+node server.js
+# Or use the provided launcher if configured
+```
+
+### Running Queries
+The system supports batch processing of inputs via JSON:
+```bash
+./ollama_json_batch_runner.sh
+```
+
+---
+
+## 6. Development & Troubleshooting
+
+### Logs
+*   `ai_server.log`: Main server activity logs.
+*   `ai_verbose.log`: Detailed debugging output.
+*   `build.log`: Frontend build logs.
+
+### Debugging Tools
+*   `debug_ai.sh`: Script to troubleshoot agent issues.
+*   `que_sql.sh`: Utility for manual SQL queries.
+*   `token_output.sh`: Likely monitors token usage or generation speed.
+
+### Database Management
+*   `sql_admin.sh` / `sql_edition.sh`: Administrative interfaces for the SQL databases.
+
+---
+
+## 7. Security & Configuration
+*   `apache-nexus.conf`: Web server configuration (Reverse proxy/Apache setup).
+*   `_.bashrc` / `_.zshrc`: Shell environment configurations tailored for the project.
+*   `cookies`: Storage for session/authentication tokens.
+
+---
+
+*Note: This documentation was generated based on the file structure analysis. For specific API details or execution logic, refer to the source code within `core/`, `agent.py`, and the `nexus_*.py` files.*
