@@ -26,6 +26,22 @@ if [ -d "$HOME/.local/bin" ] ; then
     PATH="$HOME/.local/bin:$PATH"
 fi
 
-# Python3
-source .env.local/bin/activate
-eval $(ssh-agent -s)
+# SYSTEMD via PM2 bootup
+PATH="$PATH:/home/loop/.nvm/versions/node/v22.21.1/bin";
+/usr/local/bin/pm2 startup systemd -u loop --hp /home/loop
+
+#ssh-add ~/.ssh/id_rsa
+DISPLAY=:0 SSH_ASKPASS=$(which ssh-askpass) setsid ssh-add ~/.ssh/id_rsa &
+
+# First time only – create the SQLite DB and the 8 agents
+# (the script does this automatically on first run)
+
+#chmod +x "$HOME/run-ai.sh"
+#"$HOME/run-ai.sh" # blocks the terminal – you can add an '&' to background it
+
+# SETUP SCREEN :PORT
+export DISPLAY=:0.0
+
+cd ~/_
+clear
+

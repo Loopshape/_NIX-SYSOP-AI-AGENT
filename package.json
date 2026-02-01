@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "init-db": "sqlite3 memory.db < schema.sql"
+    "init-db": "sqlite3 memory.db < schema.sql",
+    "build": "vite build"
   },
   "dependencies": {
     "express": "^4.18.2",

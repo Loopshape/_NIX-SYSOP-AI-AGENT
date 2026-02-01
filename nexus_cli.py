@@ -5,6 +5,8 @@ import json
 import subprocess
 import requests
 import sqlite3
+import hashlib
+import glob
 from typing import List, Dict, Any, Optional
 from rich.console import Console
 from rich.panel import Panel
@@ -18,8 +20,9 @@ console = Console()
 
 # --- Configuration ---
 OLLAMA_URL = "http://localhost:11434/api/chat"
-DEFAULT_MODEL = "glm-4.7:cloud"
+DEFAULT_MODEL = "llama3.2:3b"
 MEMORY_DB = "ai/.db/ai_memory.db"
+NOTES_FILE = "ai_notes.json"
 
 # --- Toolbelt Implementation ---
 
@@ -42,8 +45,11 @@ def batch_process(tasks: List[Dict[str, Any]]) -> str:
         tool_name = task.get("tool")
         args = task.get("args", {})
         if tool_name in TOOLS and tool_name != "batch_process":
-            res = TOOLS[tool_name](**args)
-            results.append({"tool": tool_name, "result": res})
+            try:
+                res = TOOLS[tool_name](**args)
+                results.append({"tool": tool_name, "result": res})
+            except Exception as e:
+                results.append({"tool": tool_name, "error": str(e)})
         else:
             results.append({"tool": tool_name, "error": "Unknown or restricted tool"})
     return json.dumps(results, indent=2)
@@ -106,6 +112,106 @@ def execute_bash(command: str) -> str:
     except Exception as e:
         return f"Bash execution failed: {e}"
 
+# --- New Tools ---
+
+def fetch_url(url: str) -> str:
+    """Fetches content from a URL."""
+    try:
+        res = requests.get(url, timeout=10)
+        return f"Status: {res.status_code}\nContent: {res.text[:2000]}..." # Truncate for safety
+    except Exception as e:
+        return f"URL fetch failed: {e}"
+
+def compute_hash(content: str, algorithm: str = "sha256") -> str:
+    """Computes hash of content."""
+    try:
+        if algorithm not in hashlib.algorithms_available:
+            return f"Algorithm {algorithm} not available."
+        h = hashlib.new(algorithm)
+        h.update(content.encode('utf-8'))
+        return h.hexdigest()
+    except Exception as e:
+        return f"Hashing failed: {e}"
+
+def git_ops(command: str, path: str = ".") -> str:
+    """Performs git operations."""
+    if not command.startswith("git "):
+        command = "git " + command
+    return execute_bash(f"cd {path} && {command}")
+
+def search_files(pattern: str, path: str = ".") -> str:
+    """Searches for files matching a glob pattern."""
+    try:
+        files = glob.glob(os.path.join(path, pattern), recursive=True)
+        return "\n".join(files[:50]) # Limit to 50 results
+    except Exception as e:
+        return f"Search failed: {e}"
+
+def manage_notes(action: str, title: str = "", content: str = "") -> str:
+    """Manages a simple JSON-based notebook."""
+    try:
+        notes = {}
+        if os.path.exists(NOTES_FILE):
+            with open(NOTES_FILE, 'r') as f:
+                notes = json.load(f)
+        
+        if action == "add":
+            notes[title] = {"content": content, "timestamp": str(os.path.getmtime(NOTES_FILE) if os.path.exists(NOTES_FILE) else 0)}
+            with open(NOTES_FILE, 'w') as f:
+                json.dump(notes, f, indent=2)
+            return f"Note '{title}' added."
+        elif action == "read":
+            return notes.get(title, {}).get("content", "Note not found.")
+        elif action == "list":
+            return "\n".join(notes.keys())
+        elif action == "delete":
+            if title in notes:
+                del notes[title]
+                with open(NOTES_FILE, 'w') as f:
+                    json.dump(notes, f, indent=2)
+                return f"Note '{title}' deleted."
+            return "Note not found."
+        else:
+            return "Invalid action. Use add, read, list, delete."
+    except Exception as e:
+        return f"Note operation failed: {e}"
+
+def seed_memory(fact: str, category: str = "general") -> str:
+    """Seeds the memory database with a fact."""
+    try:
+        conn = sqlite3.connect(MEMORY_DB)
+        cursor = conn.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS facts (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT, fact TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
+        cursor.execute("INSERT INTO facts (category, fact) VALUES (?, ?)", (category, fact))
+        conn.commit()
+        return "Memory seeded successfully."
+    except Exception as e:
+        return f"Memory seed failed: {e}"
+    finally:
+        if 'conn' in locals(): conn.close()
+
+def analyze_code(path: str) -> str:
+    """Performs basic static analysis on a file."""
+    try:
+        if not os.path.exists(path):
+            return "File not found."
+        
+        content = read_file(path)
+        lines = content.split('\n')
+        
+        analysis = {
+            "path": path,
+            "size": len(content),
+            "lines": len(lines),
+            "todo_count": content.lower().count("todo"),
+            "fixme_count": content.lower().count("fixme"),
+            "imports": [l for l in lines if l.strip().startswith("import ") or l.strip().startswith("from ")],
+            "functions": [l.strip() for l in lines if "def " in l or "function " in l]
+        }
+        return json.dumps(analysis, indent=2)
+    except Exception as e:
+        return f"Analysis failed: {e}"
+
 TOOLS = {
     "read_file": read_file,
     "write_file": write_file,
@@ -114,7 +220,14 @@ TOOLS = {
     "soap_call": soap_call,
     "db_query": db_query,
     "execute_bash": execute_bash,
-    "batch_process": batch_process
+    "batch_process": batch_process,
+    "fetch_url": fetch_url,
+    "compute_hash": compute_hash,
+    "git_ops": git_ops,
+    "search_files": search_files,
+    "manage_notes": manage_notes,
+    "seed_memory": seed_memory,
+    "analyze_code": analyze_code
 }
 
 # --- Orchestration ---
@@ -148,7 +261,7 @@ def get_tool_schemas():
         },
         {
             "name": "db_query",
-            "description": "Execute a SQL query",
+            "description": "Execute a SQL query on memory DB",
             "parameters": {"query": "string"}
         },
         {
@@ -160,6 +273,41 @@ def get_tool_schemas():
             "name": "batch_process",
             "description": "Process multiple tool calls in one go",
             "parameters": {"tasks": "list of objects with 'tool' and 'args'"}
+        },
+        {
+            "name": "fetch_url",
+            "description": "Fetch content from a URL",
+            "parameters": {"url": "string"}
+        },
+        {
+            "name": "compute_hash",
+            "description": "Compute hash of content",
+            "parameters": {"content": "string", "algorithm": "string (optional)"}
+        },
+        {
+            "name": "git_ops",
+            "description": "Run git commands",
+            "parameters": {"command": "string", "path": "string (optional)"}
+        },
+        {
+            "name": "search_files",
+            "description": "Search for files using glob patterns",
+            "parameters": {"pattern": "string", "path": "string (optional)"}
+        },
+        {
+            "name": "manage_notes",
+            "description": "Manage personal notes",
+            "parameters": {"action": "add/read/list/delete", "title": "string", "content": "string"}
+        },
+        {
+            "name": "seed_memory",
+            "description": "Save a fact to long-term memory",
+            "parameters": {"fact": "string", "category": "string (optional)"}
+        },
+        {
+            "name": "analyze_code",
+            "description": "Analyze code structure and stats",
+            "parameters": {"path": "string"}
         }
     ]
 

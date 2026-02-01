@@ -15,6 +15,8 @@ export NEXUS_ROOT="/home/loop/_"
 export AI_DIR="$NEXUS_ROOT/ai"
 export PATH="$PATH:$AI_DIR:$HOME/ollama"
 
+eval $(ssh-agent -s)
+
 # =============================================================================
 # 2. INTERACTIVE CHECK & HISTORY
 # =============================================================================
@@ -141,3 +143,9 @@ if [ -f "$HOME/.env.local/bin/activate" ]; then
 fi
 
 pm2 resurrect
+
+alias asi="ollama run glm-4.7:cloud"
+
+docker run nexus/base
+
+sudo /etc/init.d/apache2 restart
