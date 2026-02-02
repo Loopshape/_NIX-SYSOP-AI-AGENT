@@ -5,11 +5,28 @@ import bodyParser from "body-parser";
 import Database from "better-sqlite3";
 import crypto from "crypto";
 import fetch from "node-fetch";
+import { WebSocketServer } from 'ws';
 
 const app = express();
 app.use(bodyParser.json({limit:"50mb"}));
 
 const db = new Database("nexus.db");
+
+// --- WebSocket Server for Real-Time Streaming ---
+const wss = new WebSocketServer({ port: 8080 });
+
+wss.on('connection', (ws) => {
+  ws.on('error', console.error);
+  ws.send(JSON.stringify({ type: 'STATUS', message: 'Connected to NEXUS Stream' }));
+});
+
+function broadcast(data) {
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) { // OPEN
+      client.send(JSON.stringify(data));
+    }
+  });
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS memory (
@@ -42,6 +59,9 @@ let lastNode = null;
 app.post("/event", async (req,res)=>{
   const {dom, diff, prompt} = req.body;
 
+  // Broadcast input event
+  broadcast({ type: 'INPUT', prompt, timestamp: Date.now() });
+
   const response = await ollama(
     `You are NEXUS. Analyze DOM and diff.\nDOM:\n${dom}\nDIFF:\n${JSON.stringify(diff)}\nUser:${prompt}`
   );
@@ -53,6 +73,9 @@ app.post("/event", async (req,res)=>{
     .run(id,lastNode,Date.now(),"CORE",prompt,response,JSON.stringify(diff),entropy);
 
   lastNode = id;
+  
+  // Broadcast output event
+  broadcast({ type: 'OUTPUT', response, id, entropy });
 
   res.json({response,id});
 });
@@ -61,5 +84,5 @@ app.get("/memory", (req,res)=>{
   res.json(db.prepare("SELECT * FROM memory").all());
 });
 
-app.listen(3000, ()=>console.log("NEXUS online on :3000"));
+app.listen(3000, ()=>console.log("NEXUS online on :3000 (HTTP) and :8080 (WS)"));
 

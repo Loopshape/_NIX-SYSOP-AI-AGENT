@@ -7,6 +7,8 @@ import requests
 import sqlite3
 import hashlib
 import glob
+import aiohttp
+import socket
 from typing import List, Dict, Any, Optional
 from rich.console import Console
 from rich.panel import Panel
@@ -18,11 +20,28 @@ import typer
 app = typer.Typer()
 console = Console()
 
+# --- Connectivity Check ---
+
+def check_connectivity(host="8.8.8.8", port=53, timeout=3):
+    """Checks for active internet connection."""
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except socket.error:
+        return False
+
 # --- Configuration ---
+IS_ONLINE = check_connectivity()
 OLLAMA_URL = "http://localhost:11434/api/chat"
-DEFAULT_MODEL = "llama3.2:3b"
+DEFAULT_MODEL = "glm-4.7:cloud" if IS_ONLINE else "llama3.2:3b"
 MEMORY_DB = "ai/.db/ai_memory.db"
 NOTES_FILE = "ai_notes.json"
+
+if IS_ONLINE:
+    console.print(f"[bold green]ONLINE MODE DETECTED[/bold green] - Default Model: {DEFAULT_MODEL}")
+else:
+    console.print(f"[bold red]OFFLINE MODE DETECTED[/bold red] - Default Model: {DEFAULT_MODEL}")
 
 # --- Toolbelt Implementation ---
 
@@ -333,21 +352,38 @@ Focus on being helpful and efficient.
         payload = {
             "model": model,
             "messages": messages,
-            "stream": False
+            "stream": True  # Enable streaming
         }
         
+        full_content = ""
+        console.print(f"[bold magenta]NEXUS ({model}):[/bold magenta] ", end="")
+        
         try:
-            response = requests.post(OLLAMA_URL, json=payload)
-            response.raise_for_status()
-            res_json = response.json()
-            content = res_json['message']['content']
+            async with aiohttp.ClientSession() as session:
+                async with session.post(OLLAMA_URL, json=payload) as response:
+                    response.raise_for_status()
+                    
+                    async for line in response.content:
+                        if line:
+                            try:
+                                body = json.loads(line)
+                                chunk = body.get("message", {}).get("content", "")
+                                if chunk:
+                                    console.print(chunk, end="")
+                                    full_content += chunk
+                                if body.get("done", False):
+                                    break
+                            except:
+                                pass
+            console.print() # Newline after stream
+            
         except Exception as e:
-            console.print(f"[bold red]Error communicating with Ollama:[/bold red] {e}")
+            console.print(f"\n[bold red]Error communicating with Ollama:[/bold red] {e}")
             return
 
         # Check if it's a tool call
         try:
-            clean_content = content.strip()
+            clean_content = full_content.strip()
             if clean_content.startswith("```json"):
                 clean_content = clean_content.split("```json")[1].split("```")[0].strip()
             elif clean_content.startswith("```"):
@@ -363,14 +399,12 @@ Focus on being helpful and efficient.
                 console.print(f"[bold green]Result:[/bold green] {result[:500]}...")
                 
                 # Feed the result back to the model
-                messages.append({"role": "assistant", "content": content})
+                messages.append({"role": "assistant", "content": full_content})
                 messages.append({"role": "user", "content": f"Tool result: {result}"})
                 continue # Continue the loop to let the model finish
         except (json.JSONDecodeError, TypeError):
             pass
 
-        # If not a tool call or finished tool execution
-        console.print(Panel(content, title="NEXUS Response", border_style="magenta"))
         break
 
 @app.command()
@@ -425,6 +459,40 @@ Respond ONLY with the source code. No preamble, no explanation, no markdown bloc
         console.print(f"[bold green]Code saved to {output_path}[/bold green]")
     except Exception as e:
         console.print(f"[bold red]Build failed:[/bold red] {e}")
+
+@app.command()
+def index():
+    """Recursively scans and indexes the project into the persistent DB."""
+    console.print("[bold cyan]Starting Recursive Project Scan...[/bold cyan]")
+    try:
+        # Run external script to keep CLI lightweight
+        subprocess.run([sys.executable, "nexus_indexer.py"], check=True)
+    except Exception as e:
+        console.print(f"[bold red]Indexing Failed:[/bold red] {e}")
+
+@app.command()
+def suggestions():
+    """Lists optimization suggestions found by the indexer."""
+    try:
+        conn = sqlite3.connect(MEMORY_DB)
+        c = conn.cursor()
+        c.execute("SELECT path, optimization_status FROM project_index WHERE optimization_status != 'OPTIMAL'")
+        rows = c.fetchall()
+        
+        if not rows:
+            console.print("[green]No optimizations needed. Project is clean.[/green]")
+            return
+
+        table = Table(title="Optimization Candidates")
+        table.add_column("File", style="cyan")
+        table.add_column("Status", style="magenta")
+        for r in rows:
+            table.add_row(r[0], r[1])
+        console.print(table)
+        console.print("\nRun [bold yellow]nexus-cli optimize <file>[/bold yellow] to apply suggestions (Not implemented yet).")
+        conn.close()
+    except Exception as e:
+        console.print(f"[red]Error reading DB: {e}[/red]")
 
 if __name__ == "__main__":
     app()

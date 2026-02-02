@@ -5,32 +5,62 @@ import json
 import os
 import time
 import uuid
-from typing import Dict, List, Any
+import socket
+import sqlite3
+from typing import Dict, List, Any, AsyncGenerator, Optional, Tuple
 import aiohttp
 from datetime import datetime
+import math
+
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.layout import Layout
+from rich.text import Text
+from rich.table import Table
+from rich import box
 
 # --- Configuration ---
 MANDATORY_MODEL = "glm-4.7:cloud"
-PARALLEL_MODELS = ["core:latest", "loop:latest", "wave:latest", "sign:latest", 
-                   "line:latest", "cube:latest", "coin:latest", "work:latest"]
+DEFAULT_OFFLINE_MODEL = "core:latest"
+
+PARALLEL_MODELS = [
+    "core:latest", "loop:latest", "wave:latest", "sign:latest", 
+    "line:latest", "cube:latest", "coin:latest", "work:latest"
+]
 OLLAMA_API = "http://localhost:11434/api/generate"
 MEMORY_FILE = "agent_memory.json"
 
-# --- Hashing & Entropy Utilities ---
+console = Console()
+
+# --- Connectivity Check ---
+
+def check_connectivity(host="8.8.8.8", port=53, timeout=3):
+    """Checks for active internet connection."""
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except socket.error:
+        return False
+
+# --- Hashing Protocols ---
 
 def generate_genesis_hash(prompt: str) -> str:
-    """Creates a unique genesis hash for the prompt."""
+    """Creates the SHA256 Root Hash for the entire session."""
     payload = f"{prompt}-{time.time()}-{uuid.uuid4()}"
     return hashlib.sha256(payload.encode()).hexdigest()
 
-def generate_origin_hash(content: str) -> str:
-    """Creates an MD5 hash for content chunks/traceback."""
-    return hashlib.md5(content.encode()).hexdigest()
+def generate_origin_hash(agent_name: str, genesis_hash: str) -> str:
+    """Creates the MD5 Branch Hash for a specific agent's reasoning stream."""
+    payload = f"{agent_name}-{genesis_hash}-{time.time()}"
+    return hashlib.md5(payload.encode()).hexdigest()
+
+def generate_prompt_hash(prompt: str) -> str:
+    return hashlib.sha256(prompt.strip().lower().encode()).hexdigest()
 
 def calculate_entropy(content: str) -> float:
-    """Simple Shannon entropy approximation for text complexity."""
     if not content: return 0.0
-    import math
     prob = [float(content.count(c)) / len(content) for c in dict.fromkeys(list(content))]
     entropy = -sum([p * math.log(p) / math.log(2.0) for p in prob])
     return entropy
@@ -38,22 +68,19 @@ def calculate_entropy(content: str) -> float:
 # --- Memory System ---
 
 class MindmapMemory:
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str, db_path: str = "ai/.db/ai_memory.db"):
         self.filepath = filepath
+        self.db_path = db_path
         self.data = self._load()
 
     def _load(self) -> Dict:
-        default_data = {"genesis_index": {}, "mindmap_correlations": []}
+        default_data = {"genesis_index": {}, "prompt_index": {}, "mindmap_correlations": []}
         if not os.path.exists(self.filepath):
             return default_data
         try:
             with open(self.filepath, 'r') as f:
                 data = json.load(f)
-                # Ensure keys exist
-                if "genesis_index" not in data:
-                    data["genesis_index"] = {}
-                if "mindmap_correlations" not in data:
-                    data["mindmap_correlations"] = []
+                if "prompt_index" not in data: data["prompt_index"] = {}
                 return data
         except:
             return default_data
@@ -62,145 +89,259 @@ class MindmapMemory:
         with open(self.filepath, 'w') as f:
             json.dump(self.data, f, indent=2)
 
-    def log_genesis(self, genesis_hash: str, prompt: str):
+    def log_genesis(self, genesis_hash: str, prompt: str, prompt_hash: str):
+        if "genesis_index" not in self.data: self.data["genesis_index"] = {}
         self.data["genesis_index"][genesis_hash] = {
             "prompt": prompt,
             "timestamp": datetime.now().isoformat(),
             "agents": {}
         }
+        self.data["prompt_index"][prompt_hash] = genesis_hash
         self.save()
 
-    def update_agent_progress(self, genesis_hash: str, agent: str, output: str, origin_hash: str):
+    def log_agent_stream(self, genesis_hash: str, agent: str, origin_hash: str, content: str):
         if genesis_hash in self.data["genesis_index"]:
             self.data["genesis_index"][genesis_hash]["agents"][agent] = {
                 "origin_hash": origin_hash,
-                "token_count": len(output.split()),
-                "entropy": calculate_entropy(output)
+                "token_count": len(content.split()),
+                "entropy": calculate_entropy(content),
+                "content": content
             }
             self.save()
 
-# --- Async Agent Execution ---
+    def get_cached_result(self, prompt_hash: str) -> Optional[str]:
+        if prompt_hash in self.data.get("prompt_index", {}):
+            genesis_hash = self.data["prompt_index"][prompt_hash]
+            agents = self.data["genesis_index"].get(genesis_hash, {}).get("agents", {})
+            return agents.get("final_synthesis", {}).get("content", None)
+        return None
+        
+    def lookup_project_context(self, prompt: str) -> str:
+        """Scans prompt for filenames and retrieves indexed content/optimizations."""
+        if not os.path.exists(self.db_path):
+            return ""
+            
+        context_buffer = []
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            
+            # Simple heuristic: split prompt and look for exact filename matches in DB
+            # This is efficient for "Analyze nexus_swarm.py"
+            words = prompt.split()
+            potential_files = [w for w in words if '.' in w]
+            
+            for fname in potential_files:
+                # We search for paths ending with the filename
+                c.execute("SELECT path, entropy, optimization_status, suggested_content, sha256 FROM project_index WHERE path LIKE ?", (f"%{fname}",))
+                row = c.fetchone()
+                if row:
+                    path, entropy, status, suggestion, sha = row
+                    content_to_use = suggestion if (status != "OPTIMAL" and suggestion) else f"[Content of {path}]"
+                    
+                    context_buffer.append(f"\n--- PROJECT FILE DETECTED: {path} ---")
+                    context_buffer.append(f"Metrics: Entropy={entropy:.2f}, SHA256={sha[:8]}")
+                    context_buffer.append(f"Status: {status}")
+                    if status != "OPTIMAL":
+                         context_buffer.append("NOTE: This file has pending optimizations in the index.")
+                    # context_buffer.append(content_to_use[:1000]) # Limit context size
+            
+            conn.close()
+        except Exception as e:
+            return f"[DB Access Error: {e}]"
+            
+        return "\n".join(context_buffer)
 
-async def query_model(session: aiohttp.ClientSession, model: str, prompt: str, system: str = "") -> Dict:
-    """Queries a single model."""
+# --- Async Streaming Engine ---
+
+async def query_model_stream(
+    session: aiohttp.ClientSession, 
+    model: str, 
+    prompt: str, 
+    system: str = ""
+) -> AsyncGenerator[str, None]:
+    """Yields tokens from the model."""
     payload = {
         "model": model,
         "prompt": prompt,
         "system": system,
-        "stream": False
+        "stream": True
     }
     try:
         async with session.post(OLLAMA_API, json=payload) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                return {
-                    "model": model,
-                    "response": data.get("response", ""),
-                    "done": True
-                }
-            else:
-                text = await resp.text()
-                return {"model": model, "response": f"Error {resp.status}: {text}", "done": False}
+            if resp.status != 200:
+                yield f"[Error {resp.status}]"
+                return
+            
+            async for line in resp.content:
+                if line:
+                    try:
+                        data = json.loads(line)
+                        if "response" in data:
+                            yield data["response"]
+                        if data.get("done", False):
+                            break
+                    except:
+                        pass
     except Exception as e:
-        return {"model": model, "response": f"Exception: {str(e)}", "done": False}
+        yield f"[Ex: {str(e)}]"
 
-# --- Main Swarm Orchestrator ---
+# --- UI Layout ---
+
+def make_agent_grid(agent_data: Dict[str, Dict[str, str]]) -> Table:
+    """
+    Renders the Agent Grid with MD5 Hash Tags.
+    agent_data structure: { "core": {"hash": "a1b2...", "content": "..."} }
+    """
+    table = Table(box=box.ROUNDED, expand=True, show_header=True, header_style="bold cyan")
+    table.add_column("Agent / Origin Hash (MD5)", style="yellow", width=25)
+    table.add_column("Token Stream (Trace)", no_wrap=False)
+    
+    for agent, data in agent_data.items():
+        origin_hash_short = data['hash'][:8]
+        content_preview = data['content'][-250:].replace("\n", " ") if data['content'] else "[Queued...]"
+        
+        agent_label = f"{agent}\n[dim]#{origin_hash_short}[/dim]"
+        table.add_row(agent_label, content_preview)
+    return table
+
+def make_layout() -> Layout:
+    layout = Layout()
+    layout.split(
+        Layout(name="header", size=4),
+        Layout(name="main"),
+        Layout(name="footer", size=10)
+    )
+    return layout
+
+# --- Main Swarm Logic ---
 
 async def run_swarm(prompt: str):
     memory = MindmapMemory(MEMORY_FILE)
-    genesis_hash = generate_genesis_hash(prompt)
-    print(f"\n[SWARM] Genesis Hash Initiated: {genesis_hash}")
-    print(f"[SWARM] Mandatory Gatekeeper: {MANDATORY_MODEL}")
     
-    memory.log_genesis(genesis_hash, prompt)
+    # 0. Connectivity & Selection
+    is_online = check_connectivity()
+    active_gatekeeper = MANDATORY_MODEL if is_online else DEFAULT_OFFLINE_MODEL
+    active_synthesizer = MANDATORY_MODEL if is_online else DEFAULT_OFFLINE_MODEL
+    
+    # 1. Acceleration / Cache Check
+    prompt_hash = generate_prompt_hash(prompt)
+    cached = memory.get_cached_result(prompt_hash)
+    if cached:
+        console.print(Panel(cached, title="⚡ MEMORY RECALL (Accelerated)", border_style="bold yellow"))
+        return
 
-    # Semaphore to prevent overloading Ollama (limit to 2 concurrent streams)
-    sem = asyncio.Semaphore(2)
+    # 2. Genesis Initialization
+    genesis_hash = generate_genesis_hash(prompt)
+    
+    # Data Structures for UI & Logic
+    # agent_outputs[short_name] = {'hash': md5, 'content': str}
+    agent_outputs: Dict[str, Dict[str, str]] = {
+        model.split(':')[0]: {"hash": generate_origin_hash(model, genesis_hash), "content": ""} 
+        for model in PARALLEL_MODELS
+    }
+    
+    gatekeeper_data = {"hash": generate_origin_hash("gatekeeper", genesis_hash), "content": ""}
+    synthesis_data = {"hash": generate_origin_hash("synthesis", genesis_hash), "content": ""}
+    
+    status_msg = f"Network: {'ONLINE' if is_online else 'OFFLINE'} | Genesis: {genesis_hash[:8]}"
 
-    async def protected_query(session, model, prompt, system=""):
-        async with sem:
-            return await query_model(session, model, prompt, system)
+    layout = make_layout()
 
-    async with aiohttp.ClientSession() as session:
-        # 1. Cloud Gatekeeper (Mandatory)
-        print(f"[CLOUD] {MANDATORY_MODEL} analyzing prompt structure...")
-        cloud_res = await protected_query(session, MANDATORY_MODEL, prompt, 
-                                      system="You are the Cloud Gatekeeper. Analyze this prompt and provide a high-level architectural strategy for the sub-agents. **MANDATORY:** You must use VERBOSE REASONING. key-steps: 1. Deconstruct the prompt. 2. Identify ambiguity. 3. Define agent roles. 4. Output the strategy.")
+    def update_ui():
+        # Header: Genesis & Gatekeeper
+        header_text = f"ROOT: {genesis_hash}\nGATEKEEPER ({active_gatekeeper}) [#{gatekeeper_data['hash'][:8]}]: {gatekeeper_data['content'][-150:]}"
+        layout["header"].update(Panel(header_text, title="GENESIS CONTROL", border_style="blue"))
         
-        cloud_strategy = cloud_res["response"]
-        print(f"[CLOUD] Strategy defined. Origin Hash: {generate_origin_hash(cloud_strategy)}")
-        memory.update_agent_progress(genesis_hash, "cloud_gatekeeper", cloud_strategy, generate_origin_hash(cloud_strategy))
-
-        # 2. Parallel 8-Agent Bearing
-        print(f"[SWARM] Deploying 2Pi/8-Agent Bearing...")
-        tasks = []
-        for agent in PARALLEL_MODELS:
-            agent_name = agent.split(':')[0]
-            # Personalized system prompts could go here, for now using the Cloud strategy as context
-            agent_prompt = f"Context from Cloud Gatekeeper:\n{cloud_strategy}\n\nYour Task: Contribute to the solution for: '{prompt}' based on your specialized persona.\n\n**MANDATORY INSTRUCTION:**\n1. THINK FIRST: Start your response with a <thinking> section where you verbosely analyze the problem step-by-step.\n2. REASON: Explain *why* you are choosing a specific approach.\n3. ANSWER: Provide your contribution only after the reasoning phase."
-            tasks.append(protected_query(session, agent, agent_prompt))
-
-        results = await asyncio.gather(*tasks)
-
-        # 3. Shifted Entropy Mindmap & Sorting
-        print(f"[SWARM] Assembling Shifted Entropy Mindmap...")
-        processed_results = []
+        # Main: Parallel Streams
+        layout["main"].update(Panel(make_agent_grid(agent_outputs), title="2π ENTROPY SWARM (Parallel Reasoning)", border_style="green"))
         
-        for res in results:
-            content = res["response"]
-            origin_hash = generate_origin_hash(content)
-            sha_sort_key = hashlib.sha256(content.encode()).hexdigest()
-            entropy = calculate_entropy(content)
+        # Footer: Status & Synthesis
+        syn_preview = synthesis_data['content'][-400:] if synthesis_data['content'] else status_msg
+        layout["footer"].update(Panel(syn_preview, title=f"FUSION INDEX ({active_synthesizer})", border_style="magenta"))
+
+    # 3. Execution Loop
+    with Live(layout, refresh_per_second=12, console=console) as live:
+        memory.log_genesis(genesis_hash, prompt, prompt_hash)
+        
+        # --- Project Context Lookup ---
+        project_context = memory.lookup_project_context(prompt)
+        if project_context:
+            console.print(Panel(project_context, title="📂 PROJECT INDEX RECALL", border_style="cyan"))
+            # Augment prompt with context
+            prompt = f"{prompt}\n\n[SYSTEM CONTEXT FROM INDEX]:\n{project_context}"
+        
+        async with aiohttp.ClientSession() as session:
             
-            processed_results.append({
-                "agent": res["model"],
-                "content": content,
-                "origin_hash": origin_hash,
-                "sha_sort_key": sha_sort_key,
-                "entropy": entropy
-            })
+            # --- PHASE A: GATEKEEPER STRATEGY ---
+            status_msg = "Phase A: Gatekeeper Strategy..."
+            update_ui()
             
-            # Log to memory
-            memory.update_agent_progress(genesis_hash, res["model"], content, origin_hash)
+            gate_sys = "You are the NEXUS Gatekeeper. Analyze the prompt naturally. Define a strategy."
+            async for chunk in query_model_stream(session, active_gatekeeper, prompt, system=gate_sys):
+                gatekeeper_data["content"] += chunk
+                update_ui()
+            
+            memory.log_agent_stream(genesis_hash, "gatekeeper", gatekeeper_data["hash"], gatekeeper_data["content"])
 
-        # Sort by SHA256 (as requested for "sha256 sorting")
-        # In a real "shifted entropy" system, we might sort by entropy, but the prompt asked for sha256 sorting.
-        # We will use the hex string value for sorting to be deterministic.
-        processed_results.sort(key=lambda x: x["sha_sort_key"])
+            # --- PHASE B: PARALLEL SWARM (MD5 Tagged) ---
+            status_msg = "Phase B: Parallel Reasoning (MD5 Tagged)..."
+            update_ui()
 
-        # 4. Fusion & Traceback
-        print(f"[SWARM] Performing MD5 Traceback & Fusion...")
-        final_fusion = []
-        md5_chain = []
-        
-        print("\n--- SWARM CONSENSUS (Sorted by SHA256) ---\n")
-        for item in processed_results:
-            print(f"[{item['agent']}] (Entropy: {item['entropy']:.2f}) (MD5: {item['origin_hash'][:8]})...")
-            md5_chain.append(item['origin_hash'])
-            final_fusion.append(f"### Contribution from {item['agent']}\n{item['content']}")
+            async def run_single_agent(model_name):
+                short = model_name.split(':')[0]
+                # Injecting the Genesis Hash into the context so the agent knows its root
+                agent_context = (
+                    f"GENESIS ROOT: {genesis_hash}\n"
+                    f"YOUR ORIGIN ID: {agent_outputs[short]['hash']}\n"
+                    f"STRATEGY: {gatekeeper_data['content']}\n"
+                    f"TASK: Reasoning for '{prompt}'"
+                )
+                async for chunk in query_model_stream(session, model_name, agent_context, system="Provide verbose reasoning."):
+                    agent_outputs[short]["content"] += chunk
+                    # update_ui() # Implicitly handled by main loop refresh
+            
+            await asyncio.gather(*[run_single_agent(m) for m in PARALLEL_MODELS])
+            
+            # Log all agents
+            for short, data in agent_outputs.items():
+                memory.log_agent_stream(genesis_hash, short, data["hash"], data["content"])
 
-        # 5. Final Answer Seeking
-        combined_context = "\n".join(final_fusion)
-        print(f"\n[SWARM] Seeking Final Answer via {MANDATORY_MODEL}...")
-        
-        final_res = await query_model(session, MANDATORY_MODEL, 
-                                      f"Synthesize the following agent contributions (which include verbose reasoning) into a single, cohesive final answer.\n\n{combined_context}",
-                                      system="You are the Final Synthesizer. Analyze the <thinking> steps of all agents. Synthesize their reasoning into a superior final answer. MANDATORY: Explain the consensus logic used.")
-        
-        print("\n" + "="*60)
-        print("FINAL ANSWER")
-        print("="*60 + "\n")
-        print(final_res["response"])
-        
-        # Log final state
-        memory.update_agent_progress(genesis_hash, "final_synthesis", final_res["response"], generate_origin_hash(final_res["response"]))
-        print(f"\n[SWARM] Mission Complete. Genesis Hash {genesis_hash} archived.")
+            # --- PHASE C: REROOTING & FUSION ---
+            status_msg = "Phase C: Rerooting & Final Fusion..."
+            update_ui()
+            
+            # Constructing the Fusion Index
+            fusion_context = "SOURCE MATERIAL (Indexed by MD5):\n"
+            for short, data in agent_outputs.items():
+                fusion_context += f"--- AGENT {short.upper()} [ID: {data['hash']}] ---\n{data['content']}\n\n"
+            
+            syn_sys = (
+                "You are the NEXUS Synthesizer. "
+                "Synthesize the MD5-indexed source material into a single, valid, human-like final answer. "
+                "Resolve conflicts by weighting the reasoning quality."
+            )
+            
+            async for chunk in query_model_stream(session, active_synthesizer, fusion_context, system=syn_sys):
+                synthesis_data["content"] += chunk
+                update_ui()
+                
+            memory.log_agent_stream(genesis_hash, "final_synthesis", synthesis_data["hash"], synthesis_data["content"])
+            status_msg = "✅ SEQUENCE COMPLETE."
+            update_ui()
+
+    # Final Output
+    console.print(Panel(synthesis_data["content"], title="FINAL FUSION ANSWER", border_style="bold magenta"))
+    console.print(f"[dim]Genesis Hash: {genesis_hash}[/dim]")
 
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: ./nexus_swarm.py \"Your Prompt Here\"")
+        console.print("[bold red]Usage:[/bold red] ./nexus_swarm.py \"Your Prompt Here\"")
         sys.exit(1)
     
     prompt = sys.argv[1]
-    asyncio.run(run_swarm(prompt))
+    try:
+        asyncio.run(run_swarm(prompt))
+    except KeyboardInterrupt:
+        console.print("\n[bold red]Swarm Interrupted.[/bold red]")

@@ -54,19 +54,6 @@ DEFAULT_TIMEOUT=30                       # seconds for external calls
 OLLAMA_RETRIES=3
 MAX_CONTENT_LEN=8192                    # max chars to store in memory
 
-# -------------------------
-# MCP Extension
-# -------------------------
-MCP_LOADER="${HOME}/_/mcp/loader.sh"
-if [[ -f "$MCP_LOADER" ]]; then
-    # We need to define log function before sourcing if the loader uses it, 
-    # but the log function is defined later in this script.
-    # However, the loader defined in generate_mcp_content.py only uses echo.
-    # So it is safe to source here, or we can move this block after log function definition.
-    # Ideally, source it after log definition so we can use log inside the check.
-    : # Placeholder for logic flow, see actual insertion below
-fi
-
 mkdir -p "$DB_DIR" "$WWW_DIR"
 : > "$LOG_FILE" || true
 : > "$STRUCTURED_LOG" || true
@@ -88,16 +75,6 @@ obj={"ts":"%s","level":"%s","msg":"%s"}
 print(json.dumps(obj))
 PY
 }
-
-# -------------------------
-# MCP Extension Loading
-# -------------------------
-if [[ -f "$MCP_LOADER" ]]; then
-  log "INFO" "Loading MCP extensions from $MCP_LOADER"
-  source "$MCP_LOADER"
-else
-  log "WARN" "MCP loader not found at $MCP_LOADER"
-fi
 
 # -------------------------
 # DB / Memory helpers

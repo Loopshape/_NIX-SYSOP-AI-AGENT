@@ -7,8 +7,12 @@ import subprocess
 import psutil
 from pathlib import Path
 import aiohttp
+import aiofiles
 import time
 import os
+from rich.console import Console
+
+console = Console()
 
 # -------------------------------
 # CONFIG
@@ -45,7 +49,7 @@ MAX_CONCURRENT_AGENTS = 4  # DeskPro constraint
 # -------------------------------
 
 def log_info(msg):
-    print(f"[INFO] {msg}")
+    console.log(f"[bold cyan][INFO][/bold cyan] {msg}")
 
 def get_network_speed_mbps():
     # crude: returns download speed in Mbps

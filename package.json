@@ -5,6 +5,7 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
+    "prod:start": "pm2-runtime /home/loop/_/app.js",
     "start": "node server.js",
     "init-db": "sqlite3 memory.db < schema.sql",
     "build": "vite build"

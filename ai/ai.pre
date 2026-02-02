@@ -32,7 +32,6 @@ STRUCTURED_LOG="${DB_DIR}/ai_system.jsonl"
 
 # Map of agent label -> model (adjust to your local names)
 declare -A AGENT_MODELS=(
-  [SIGN]="glm-4.7:cloud"
   [CUBE]="gemma3:1b"
   [CORE]="deepseek-v3.1:671b-cloud"
   [LOOP]="loop:latest"
@@ -43,29 +42,16 @@ declare -A AGENT_MODELS=(
   [WORK]="deepseek-v3.1:671b-cloud"
 )
 # Optional per-agent timeout (seconds) and weight (simple int)
-declare -A AGENT_TIMEOUT=( [SIGN]=40 [CUBE]=20 [CORE]=30 [LOOP]=18 [LINE]=18 [WAVE]=20 [COIN]=20 [CODE]=30 [WORK]=25 )
-declare -A AGENT_WEIGHT=( [SIGN]=4 [CUBE]=1 [CORE]=3 [LOOP]=1 [LINE]=1 [WAVE]=1 [COIN]=1 [CODE]=3 [WORK]=1 )
+declare -A AGENT_TIMEOUT=( [CUBE]=20 [CORE]=30 [LOOP]=18 [LINE]=18 [WAVE]=20 [COIN]=20 [CODE]=30 [WORK]=25 )
+declare -A AGENT_WEIGHT=( [CUBE]=1 [CORE]=3 [LOOP]=1 [LINE]=1 [WAVE]=1 [COIN]=1 [CODE]=3 [WORK]=1 )
 
-AGENT_ORDER=(SIGN CUBE CORE LOOP LINE WAVE COIN CODE WORK)
+AGENT_ORDER=(CUBE CORE LOOP LINE WAVE COIN CODE WORK)
 
 # Operational flags
 ALLOW_EXECUTE="${ALLOW_EXECUTE:-0}"   # must be set to 1 explicitly to execute model-produced shell code
 DEFAULT_TIMEOUT=30                       # seconds for external calls
 OLLAMA_RETRIES=3
 MAX_CONTENT_LEN=8192                    # max chars to store in memory
-
-# -------------------------
-# MCP Extension
-# -------------------------
-MCP_LOADER="${HOME}/_/mcp/loader.sh"
-if [[ -f "$MCP_LOADER" ]]; then
-    # We need to define log function before sourcing if the loader uses it, 
-    # but the log function is defined later in this script.
-    # However, the loader defined in generate_mcp_content.py only uses echo.
-    # So it is safe to source here, or we can move this block after log function definition.
-    # Ideally, source it after log definition so we can use log inside the check.
-    : # Placeholder for logic flow, see actual insertion below
-fi
 
 mkdir -p "$DB_DIR" "$WWW_DIR"
 : > "$LOG_FILE" || true
@@ -88,16 +74,6 @@ obj={"ts":"%s","level":"%s","msg":"%s"}
 print(json.dumps(obj))
 PY
 }
-
-# -------------------------
-# MCP Extension Loading
-# -------------------------
-if [[ -f "$MCP_LOADER" ]]; then
-  log "INFO" "Loading MCP extensions from $MCP_LOADER"
-  source "$MCP_LOADER"
-else
-  log "WARN" "MCP loader not found at $MCP_LOADER"
-fi
 
 # -------------------------
 # DB / Memory helpers
@@ -177,7 +153,7 @@ recall() {
 ollama_call() {
   # usage: ollama_call "<prompt>" "<model>" "<timeout_seconds>"
   local prompt="${1:-}"
-  local model="${2:-${AGENT_MODELS[CODE]:-glm-4.7:cloud}}"
+  local model="${2:-${AGENT_MODELS[CODE]:-llama3}}"
   local timeout="${3:-$DEFAULT_TIMEOUT}"
 
   log "DEBUG" "ollama_call model=$model timeout=${timeout}s prompt_len=${#prompt}"
@@ -230,7 +206,7 @@ consensus() {
   declare -A hash_value
 
   for agent in "${AGENT_ORDER[@]}"; do
-    local model="${AGENT_MODELS[$agent]:-glm-4.7:cloud}"
+    local model="${AGENT_MODELS[$agent]:-llama3}"
     local timeout=${AGENT_TIMEOUT[$agent]:-$DEFAULT_TIMEOUT}
     local prompt="[AGENT:${agent}] [CONTEXT:${recall_context}] [PROMPT:${user_prompt}]"
     local result
@@ -300,7 +276,7 @@ file_agent() {
   local instruction="${1:-}"
   log "INFO" "file_agent received instruction (len=${#instruction})"
 
-  local code_model="${AGENT_MODELS[CODE]:-glm-4.7:cloud}"
+  local code_model="${AGENT_MODELS[CODE]:-phi:2.7b}"
   local plan
   plan=$(ollama_call "# Linux automation agent. Output ONLY executable bash (no explanations):\n\n$instruction" "$code_model" 30)
 
