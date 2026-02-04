@@ -1,0 +1,13 @@
+[Unit]
+Description=NEXUS-AI daemon
+After=network.target
+
+[Service]
+Type=simple
+User=loop
+Environment=BASE_DIR=/home/loop/_/ai
+ExecStart=/home/loop/_/ai/nexus_ai_v5.2.sh daemon
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
