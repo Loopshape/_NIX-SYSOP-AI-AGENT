@@ -1,0 +1,65 @@
+{
+  "deepseek-v3.1:671b-cloud": {
+    "runs": 0,
+    "applied": 0,
+    "total_bytes": 0,
+    "avg_latency": 0,
+    "score": 0
+  },
+  "cube": {
+    "runs": 1,
+    "applied": 1,
+    "total_bytes": 3075,
+    "avg_latency": 657651,
+    "score": 94
+  },
+  "core": {
+    "runs": 1,
+    "applied": 1,
+    "total_bytes": 144,
+    "avg_latency": 1398297,
+    "score": 52
+  },
+  "loop": {
+    "runs": 1,
+    "applied": 1,
+    "total_bytes": 1340,
+    "avg_latency": 1195368,
+    "score": 23
+  },
+  "wave": {
+    "runs": 1,
+    "applied": 1,
+    "total_bytes": 373,
+    "avg_latency": 101191,
+    "score": 33
+  },
+  "line": {
+    "runs": 1,
+    "applied": 1,
+    "total_bytes": 326,
+    "avg_latency": 762311,
+    "score": 61
+  },
+  "coin": {
+    "runs": 1,
+    "applied": 1,
+    "total_bytes": 994,
+    "avg_latency": 1330279,
+    "score": 67
+  },
+  "code": {
+    "runs": 1,
+    "applied": 1,
+    "total_bytes": 419,
+    "avg_latency": 50080,
+    "score": 28
+  },
+  "work": {
+    "runs": 1,
+    "applied": 1,
+    "total_bytes": 239,
+    "avg_latency": 979616,
+    "score": 15
+  }
+}

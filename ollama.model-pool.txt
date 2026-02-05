@@ -1,0 +1,23 @@
+NAME                        ID              SIZE      MODIFIED     
+glm-4.7:cloud               023608864819    -         3 days ago      
+zone:latest                 31237ad1b7de    168 B     4 days ago      
+sign:latest                 66dba45d9cc4    4.5 KB    8 days ago      
+nomic-embed-text:latest     0a109f422b47    274 MB    8 days ago      
+deepseek-r1:latest          6995872bfe4c    5.2 GB    8 days ago      
+llama3:latest               365c0bd3c000    4.7 GB    9 days ago      
+llama3.2:3b                 a80c4f17acd5    2.0 GB    3 weeks ago     
+gpt-oss:120b-cloud          569662207105    -         4 weeks ago     
+gemma3:1b                   8648f39daa8f    815 MB    8 weeks ago     
+llama3:8b                   31237ad1b7de    168 B     8 weeks ago     
+line:latest                 ba3be50c62ae    1.6 GB    2 months ago    
+work:latest                 c3af92a25f52    1.6 GB    2 months ago    
+stable-code:latest          37681d29a55a    1.6 GB    2 months ago    
+qwen3-vl:2b                 0635d9d857d4    1.9 GB    2 months ago    
+phi:2.7b                    e2fd6321a5fe    1.6 GB    2 months ago    
+deepseek-v3.1:671b-cloud    d3749919e45f    -         2 months ago    
+wave:latest                 c25afa6b4664    776 MB    2 months ago    
+core:latest                 d61b121ef771    815 MB    2 months ago    
+cube:latest                 509be85fc54c    1.6 GB    2 months ago    
+coin:latest                 71df354c7c68    815 MB    2 months ago    
+loop:latest                 71df354c7c68    815 MB    2 months ago    
+code:latest                 071d77eeb918    776 MB    2 months ago    

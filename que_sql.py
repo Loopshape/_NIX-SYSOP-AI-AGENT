@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sqlite3
 
 DB_PATH = "/home/loop/.local_ai/core.db"

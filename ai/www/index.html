@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>NEXUS-AI Dashboard</title>
+<style>
+body{font-family:sans-serif;margin:18px;background:#0f0f12;color:#eaeaea}
+.card{background:#111;padding:12px;border-radius:8px;margin-bottom:12px}
+pre{white-space:pre-wrap}
+</style>
+</head>
+<body>
+<h1>NEXUS-AI — Dashboard</h1>
+<div class="card">
+<h3>Send prompt</h3>
+<textarea id="prompt" rows="4" cols="60"></textarea><br/>
+<button id="send">Send</button>
+<pre id="resp"></pre>
+</div>
+<div class="card">
+<h3>Recent memory</h3>
+<pre id="mem">loading...</pre>
+</div>
+<script>
+async function fetchMem(){
+  const r=await fetch('/memory');
+  const j=await r.json();
+  document.getElementById('mem').textContent=JSON.stringify(j,null,2);
+}
+fetchMem();
+document.getElementById('send').onclick=async()=>{
+  const p=document.getElementById('prompt').value;
+  const res=await fetch('/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p})});
+  const j=await res.json();
+  document.getElementById('resp').textContent=JSON.stringify(j,null,2);
+}
+</script>
+</body>
+</html>

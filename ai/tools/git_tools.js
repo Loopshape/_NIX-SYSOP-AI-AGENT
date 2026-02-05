@@ -16,4 +16,11 @@ function git_commit(repoPath, message) {
     if (!message || message.length < 5) return { error: 'Invalid commit message' };
     try {
         execSync('git add .', { cwd: validPath });
-        const result = execSync(`git commit -m "${message.replace(/
+        const result = execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, { cwd: validPath }).toString();
+        return { result: result.trim() };
+    } catch (error) {
+        return { error: error.message };
+    }
+}
+
+module.exports = { git_status, git_commit };
